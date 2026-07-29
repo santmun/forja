@@ -44,8 +44,18 @@ DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 #   KB_REINDEX_TOKEN           required — guards POST /kb/reindex (header: X-Reindex-Token)
 #                              set with: wrangler secret put KB_REINDEX_TOKEN
 #   TELEGRAM_BOT_TOKEN         per-channel — Telegram bot
+#   TELEGRAM_WEBHOOK_SECRET    required if using Telegram — secret_token passed to setWebhook;
+#                              without it /webhooks/telegram rejects everything (fail-closed).
+#                              set with: wrangler secret put TELEGRAM_WEBHOOK_SECRET
+#                              then register it: curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
+#                                -d url=https://<worker>/webhooks/telegram -d secret_token=<same value>
 #   MANYCHAT_API_KEY           per-channel — ManyChat (Pro)
+#   MANYCHAT_WEBHOOK_SECRET    required if using ManyChat — shared secret sent by ManyChat as a
+#                              custom header (X-Manychat-Secret) on its External Request; without
+#                              it /webhooks/manychat rejects everything (fail-closed).
+#                              set with: wrangler secret put MANYCHAT_WEBHOOK_SECRET
 #   TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WA_FROM   per-channel — Twilio WhatsApp (Pro)
+#                              (TWILIO_AUTH_TOKEN also validates X-Twilio-Signature on /webhooks/twilio)
 #   CALCOM_API_KEY             optional — scheduleAppointment (Pro)
 #   GOOGLE_SERVICE_ACCOUNT_JSON  optional — Sheets export (Pro)
 #   RESEND_API_KEY             optional — handoff email
@@ -59,6 +69,14 @@ DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 
 [triggers]
 crons = ["0 3 * * *"]  # daily 3am UTC: purge old messages
+
+# Rate limiting: el Worker ya trae un throttle por IP de baja fricción
+# (src/rate-limit.ts, D1-backed) en los webhooks y /kb/reindex. Para producción
+# real (sobre todo si vas a revender/manejar varios clientes), agrega además una
+# Cloudflare Rate Limiting Rule a nivel de cuenta — es la capa principal, corre
+# antes de que el request le cueste nada al Worker:
+#   dashboard → tu dominio → Security → WAF → Rate limiting rules
+#   (o `wrangler` con un [[rules]] tipo ratelimit una vez el binding sea GA)
 
 # DASHBOARD_PASSWORD  (secret) — HTTP Basic Auth password for the admin dashboard; username is always "admin".
 # Set it with: wrangler secret put DASHBOARD_PASSWORD

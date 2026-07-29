@@ -7,7 +7,9 @@ import { createTestMiniflare } from "./helpers/miniflareSetup";
 import { Db } from "../src/db/client";
 import { ConversationsRepo } from "../src/db/conversations";
 import { MessagesRepo } from "../src/db/messages";
-import { monthIaCostUsd, monthStartMs, applyBudgetGuard } from "../src/budget";
+import { SettingsRepo, SETTING_KEYS } from "../src/db/settings";
+import { monthIaCostUsd, monthStartMs, applyBudgetGuard, enforceBudgetGuard } from "../src/budget";
+import type { Env } from "../src/env";
 
 describe("applyBudgetGuard", () => {
   it("does nothing without a budget", () => {
@@ -62,5 +64,44 @@ describe("monthIaCostUsd", () => {
 
   it("returns 0 with no usage", async () => {
     expect(await monthIaCostUsd(db)).toBe(0);
+  });
+});
+
+describe("enforceBudgetGuard", () => {
+  let db: Db;
+  let settings: SettingsRepo;
+  // Sin ningún canal de aviso configurado, notifyOwner solo loguea y retorna
+  // (ver src/tools/handoffHuman.ts) — no hace falta mockear fetch/Resend.
+  const env = { DASHBOARD_BASE_URL: "https://test.workers.dev" } as unknown as Env;
+
+  beforeEach(async () => {
+    const mf = await createTestMiniflare();
+    db = new Db((await mf.getD1Database("DB")) as any);
+    settings = new SettingsRepo(db);
+  });
+
+  it("downgrades but does NOT pause below the 1.5x hard-stop", async () => {
+    const result = await enforceBudgetGuard(env, db, "smart", 6, 5); // 1.2x
+    expect(result).toEqual({ tier: "fast", downgraded: true, paused: false });
+    expect(await settings.get(SETTING_KEYS.botPaused)).toBeNull();
+  });
+
+  it("pauses the bot and flips bot_paused at/over 1.5x the budget", async () => {
+    const result = await enforceBudgetGuard(env, db, "smart", 7.5, 5); // exactly 1.5x
+    expect(result.paused).toBe(true);
+    expect(await settings.get(SETTING_KEYS.botPaused)).toBe("1");
+  });
+
+  it("is idempotent — does not re-report paused once already paused", async () => {
+    await enforceBudgetGuard(env, db, "smart", 10, 5);
+    const second = await enforceBudgetGuard(env, db, "fast", 10, 5);
+    expect(second.paused).toBe(false); // ya estaba pausado, no hay nada nuevo que hacer
+    expect(await settings.get(SETTING_KEYS.botPaused)).toBe("1");
+  });
+
+  it("never pauses without a configured budget", async () => {
+    const result = await enforceBudgetGuard(env, db, "smart", 9999, undefined);
+    expect(result.paused).toBe(false);
+    expect(await settings.get(SETTING_KEYS.botPaused)).toBeNull();
   });
 });

@@ -1,7 +1,24 @@
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
 import type { Env } from "../env";
+import { tokensMatch } from "../http-auth";
 
 const MANYCHAT_API = "https://api.manychat.com/fb";
+
+/**
+ * ManyChat no firma sus webhooks salientes (External Request), así que la
+ * protección es un shared secret que el propio miembro configura como header
+ * custom (`X-Manychat-Secret`) en el flow de ManyChat, comparado contra
+ * MANYCHAT_WEBHOOK_SECRET. Fail-closed: sin secret configurado, sin header, o
+ * si no coincide → false.
+ */
+export function verifyManychatSecret(
+  headerValue: string | null | undefined,
+  env: Env,
+): boolean {
+  const expected = env.MANYCHAT_WEBHOOK_SECRET?.trim();
+  if (!expected) return false;
+  return tokensMatch((headerValue ?? "").trim(), expected);
+}
 
 // Aligned with a typical ManyChat/n8n production flow:
 // - ManyChat posts the subscriber in `id` (NOT `subscriber_id`).

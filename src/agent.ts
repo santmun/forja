@@ -13,7 +13,7 @@ import { chunkReply } from "./replies/chunker";
 import { pickAdapter } from "./replies/sender";
 import { selectModel } from "./upgrade/modelSelector";
 import type { Tier } from "./upgrade/modelSelector";
-import { monthIaCostUsd, applyBudgetGuard } from "./budget";
+import { monthIaCostUsd, enforceBudgetGuard } from "./budget";
 import { CustomerFactsRepo } from "./db/facts";
 import { createModel } from "./llm/provider";
 import { costOfUsage } from "./pricing";
@@ -269,14 +269,21 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
               lastSearchKbScore: this.state.lastSearchKbScore,
             });
 
-    // Budget guard: at/over the monthly AI budget the bot keeps answering but
-    // only on the cheap tier (never goes silent over money).
-    if (cfg.monthlyBudgetUsd !== undefined && tier !== "fast") {
+    // Budget guard: at the monthly AI budget the bot downgrades to the cheap
+    // tier (never goes silent over money); at 1.5x it pauses itself for good
+    // (enforceBudgetGuard flips the same bot_paused switch the dashboard
+    // uses) and notifies the owner — a downgrade alone doesn't cap spend.
+    if (cfg.monthlyBudgetUsd !== undefined) {
       const spent = await monthIaCostUsd(db);
-      const guard = applyBudgetGuard(tier, spent, cfg.monthlyBudgetUsd);
+      const guard = await enforceBudgetGuard(this.env, db, tier, spent, cfg.monthlyBudgetUsd);
       if (guard.downgraded) {
         console.warn(
           `[SupportAgent] monthly budget reached ($${spent.toFixed(2)}/$${cfg.monthlyBudgetUsd}) — downgrading to fast tier`,
+        );
+      }
+      if (guard.paused) {
+        console.error(
+          `[SupportAgent] monthly budget hard-stop ($${spent.toFixed(2)} >= 1.5x $${cfg.monthlyBudgetUsd}) — bot paused, owner notified`,
         );
       }
       tier = guard.tier;
