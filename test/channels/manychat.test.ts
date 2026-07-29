@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { manychatAdapter } from "../../src/channels/manychat";
+import { manychatAdapter, verifyManychatSecret } from "../../src/channels/manychat";
 import type { Env } from "../../src/env";
 
 // Payloads mirror a typical ManyChat/n8n flow: ManyChat posts the subscriber in
@@ -147,5 +147,25 @@ describe("manychatAdapter.sendReply", () => {
     );
     const body = JSON.parse(String((fetchSpy.mock.calls[0][1] as RequestInit).body));
     expect(body.data.content.type).toBe("whatsapp");
+  });
+});
+
+describe("verifyManychatSecret", () => {
+  const withSecret = { MANYCHAT_WEBHOOK_SECRET: "mc-shh-456" } as Env;
+
+  it("fails closed when MANYCHAT_WEBHOOK_SECRET is not configured", () => {
+    expect(verifyManychatSecret("mc-shh-456", {} as Env)).toBe(false);
+  });
+
+  it("rejects a missing header", () => {
+    expect(verifyManychatSecret(undefined, withSecret)).toBe(false);
+  });
+
+  it("rejects a wrong header value", () => {
+    expect(verifyManychatSecret("wrong", withSecret)).toBe(false);
+  });
+
+  it("accepts the exact configured secret", () => {
+    expect(verifyManychatSecret("mc-shh-456", withSecret)).toBe(true);
   });
 });

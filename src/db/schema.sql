@@ -203,3 +203,14 @@ CREATE TABLE IF NOT EXISTS template_sends (
   UNIQUE (campaign_key, conversation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_template_sends_time ON template_sends(sent_at);
+
+-- Throttle por IP (defensa en profundidad) para rutas expuestas sin sesión:
+-- webhooks y /kb/reindex. Un contador por ventana fija (bucket:ip), reseteado
+-- cuando cambia window_start. Ver src/rate-limit.ts. La capa principal es una
+-- Cloudflare Rate Limiting Rule (fuera de este repo, dashboard de Cloudflare)
+-- -- esto cubre el caso sin esa regla configurada.
+CREATE TABLE IF NOT EXISTS rate_limits (
+  key TEXT PRIMARY KEY,
+  window_start INTEGER NOT NULL,
+  count INTEGER NOT NULL
+);

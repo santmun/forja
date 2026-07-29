@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
 import type { ChannelAdapter } from "./channels/shared";
-import { telegramAdapter } from "./channels/telegram";
-import { manychatAdapter } from "./channels/manychat";
-import { twilioAdapter } from "./channels/twilio";
+import { telegramAdapter, verifyTelegramSecret } from "./channels/telegram";
+import { manychatAdapter, verifyManychatSecret } from "./channels/manychat";
+import { twilioAdapter, verifyTwilioSignature } from "./channels/twilio";
 import { parseMetaEvents, verifyMetaSignature } from "./channels/meta";
 import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
 import { adminApp } from "./admin/routes";
@@ -16,6 +16,7 @@ import { detectKind } from "./learn/fieldPath";
 import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch } from "./http-auth";
 import { apiApp } from "./api";
+import { isRateLimited, clientIp } from "./rate-limit";
 
 export { SupportAgent } from "./agent";
 
@@ -54,12 +55,55 @@ async function routeToAgent(c: { req: { raw: Request }; env: Env; text: (t: stri
   }
 }
 
-app.post("/webhooks/telegram", (c) => routeToAgent(c, telegramAdapter));
-app.post("/webhooks/manychat", (c) => routeToAgent(c, manychatAdapter));
-// WhatsApp (Twilio): rutea el mensaje entrante al bot de clientes (Claude). El
-// body se lee UNA vez; ack con TwiML vacío para que Twilio no reenvíe el cuerpo
-// como mensaje.
+// Throttle por IP (defensa en profundidad, ver src/rate-limit.ts) — corre
+// ANTES de verificar firma/secret, así una ráfaga no le cuesta ni un HMAC al
+// Worker. La capa principal es una Cloudflare Rate Limiting Rule a nivel de
+// cuenta (fuera de este repo).
+async function checkRateLimit(c: { req: { raw: Request }; env: Env }, bucket: string): Promise<boolean> {
+  const db = new Db(c.env.DB);
+  return isRateLimited(db, bucket, clientIp(c.req.raw));
+}
+
+// Telegram firma cada POST con el secret_token puesto al registrar el webhook
+// (setWebhook). Sin verificar esto, cualquiera que adivine la URL del Worker
+// puede mandar un Update falso — incluso suplantar al dueño, ya que
+// OWNER_TELEGRAM_CHAT_ID no es secreto. Fail-closed.
+app.post("/webhooks/telegram", async (c) => {
+  if (await checkRateLimit(c, "webhooks/telegram")) return c.text("too many requests", 429);
+  if (!verifyTelegramSecret(c.req.header("x-telegram-bot-api-secret-token"), c.env)) {
+    return c.text("forbidden", 403);
+  }
+  return routeToAgent(c, telegramAdapter);
+});
+
+// ManyChat no firma sus External Requests: la protección es un shared secret
+// que el miembro configura como header custom en su flow. Fail-closed.
+app.post("/webhooks/manychat", async (c) => {
+  if (await checkRateLimit(c, "webhooks/manychat")) return c.text("too many requests", 429);
+  if (!verifyManychatSecret(c.req.header("x-manychat-secret"), c.env)) {
+    return c.text("forbidden", 403);
+  }
+  return routeToAgent(c, manychatAdapter);
+});
+
+// WhatsApp (Twilio): rutea el mensaje entrante al bot de clientes (Claude).
+// Valida X-Twilio-Signature (fail-closed) antes de procesar — el body de
+// formData() se lee del clon para no consumir el stream que necesita
+// twilioAdapter.parseIncoming(). Ack con TwiML vacío para que Twilio no
+// reenvíe el cuerpo como mensaje.
 app.post("/webhooks/twilio", async (c) => {
+  if (await checkRateLimit(c, "webhooks/twilio")) return c.text("too many requests", 429);
+  const form = await c.req.raw.clone().formData();
+  const params: Record<string, string> = {};
+  for (const [k, v] of form.entries()) params[k] = String(v);
+  const valid = await verifyTwilioSignature(
+    c.req.url,
+    params,
+    c.req.header("x-twilio-signature"),
+    c.env.TWILIO_AUTH_TOKEN,
+  );
+  if (!valid) return c.text("bad signature", 403);
+
   let msg;
   try {
     msg = await twilioAdapter.parseIncoming(c.req.raw, c.env);
@@ -205,6 +249,13 @@ app.route("/api", apiApp);
 // KB_REINDEX_TOKEN secret via the X-Reindex-Token header. Trigger after deploy:
 //   curl -X POST https://<worker>/kb/reindex -H "X-Reindex-Token: <token>"
 app.post("/kb/reindex", async (c) => {
+  // Fail-closed por token, pero sin límite de intentos: un throttle más
+  // estricto (5/min) que el de los webhooks frena la fuerza bruta sobre el
+  // token mismo.
+  const db = new Db(c.env.DB);
+  if (await isRateLimited(db, "kb/reindex", clientIp(c.req.raw), { max: 5 })) {
+    return c.json({ ok: false, error: "too many requests" }, 429);
+  }
   const provided = c.req.header("X-Reindex-Token") ?? "";
   const expected = c.env.KB_REINDEX_TOKEN ?? "";
   if (!expected || !tokensMatch(provided, expected)) {

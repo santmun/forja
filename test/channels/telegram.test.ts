@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { telegramAdapter, resolveTelegramFileUrl } from "../../src/channels/telegram";
+import { telegramAdapter, resolveTelegramFileUrl, verifyTelegramSecret } from "../../src/channels/telegram";
 import type { Env } from "../../src/env";
 
 function makeReq(body: unknown): Request {
@@ -118,5 +118,26 @@ describe("resolveTelegramFileUrl", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("nope", { status: 400 }));
     const url = await resolveTelegramFileUrl("x", "tok");
     expect(url).toBeNull();
+  });
+});
+
+describe("verifyTelegramSecret", () => {
+  const withSecret = { TELEGRAM_WEBHOOK_SECRET: "shh-123" } as Env;
+
+  it("fails closed when TELEGRAM_WEBHOOK_SECRET is not configured", () => {
+    expect(verifyTelegramSecret("shh-123", {} as Env)).toBe(false);
+  });
+
+  it("rejects a missing header", () => {
+    expect(verifyTelegramSecret(undefined, withSecret)).toBe(false);
+    expect(verifyTelegramSecret(null, withSecret)).toBe(false);
+  });
+
+  it("rejects a wrong header value", () => {
+    expect(verifyTelegramSecret("wrong", withSecret)).toBe(false);
+  });
+
+  it("accepts the exact configured secret", () => {
+    expect(verifyTelegramSecret("shh-123", withSecret)).toBe(true);
   });
 });

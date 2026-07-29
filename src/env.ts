@@ -38,7 +38,18 @@ export interface Env {
   OPENAI_API_KEY?: string;  // alternative LLM provider (see LLM_PROVIDER)
   RESEND_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
+  // secret_token puesto al registrar el webhook (setWebhook); valida el
+  // header X-Telegram-Bot-Api-Secret-Token en cada POST entrante (fail-closed
+  // si falta — ver src/channels/telegram.ts verifyTelegramSecret).
+  TELEGRAM_WEBHOOK_SECRET?: string;
   MANYCHAT_API_KEY?: string;
+  // shared secret que el miembro configura como header custom
+  // (X-Manychat-Secret) en el External Request de su flow de ManyChat; valida
+  // el origen del webhook (fail-closed si falta — ver
+  // src/channels/manychat.ts verifyManychatSecret). ManyChat no firma sus
+  // webhooks nativamente, así que esto es lo único que evita que cualquiera
+  // mande un POST falso a /webhooks/manychat.
+  MANYCHAT_WEBHOOK_SECRET?: string;
   MANYCHAT_CONTENT_TYPE?: "instagram" | "whatsapp" | "telegram" | "messenger"; // ManyChat channel for sendContent; defaults to "instagram"
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;

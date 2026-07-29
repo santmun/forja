@@ -1,7 +1,25 @@
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
 import type { Env } from "../env";
+import { tokensMatch } from "../http-auth";
 
 const TG_API = "https://api.telegram.org/bot";
+
+/**
+ * Valida el header `X-Telegram-Bot-Api-Secret-Token` que Telegram manda en
+ * cada POST cuando el webhook se registró con `secret_token` (ver
+ * https://core.telegram.org/bots/api#setwebhook). Fail-closed: sin
+ * TELEGRAM_WEBHOOK_SECRET configurado, o sin header, o si no coincide → false.
+ * Sin esto, cualquiera que adivine la URL del Worker puede mandar un Update
+ * falso y el bot lo procesa como si viniera de Telegram.
+ */
+export function verifyTelegramSecret(
+  headerValue: string | null | undefined,
+  env: Env,
+): boolean {
+  const expected = env.TELEGRAM_WEBHOOK_SECRET?.trim();
+  if (!expected) return false;
+  return tokensMatch((headerValue ?? "").trim(), expected);
+}
 
 interface TgUpdate {
   update_id: number;
