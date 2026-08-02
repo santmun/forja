@@ -22,7 +22,7 @@
     "@ai-sdk/openai": "^3.0.68",
     "@ai-sdk/xai": "^3.0.106",
     "@anthropic-ai/sdk": "^0.90.0",
-    "agents": "^0.1.0",
+    "agents": "^0.3.10",
     "ai": "^6.0.0",
     "hono": "^4.10.0",
     "resend": "^6.12.0",
