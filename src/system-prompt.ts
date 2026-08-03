@@ -10,6 +10,7 @@ export interface SystemPromptInput {
   tone?: string;                    // owner-chosen tone (e.g. "cálido y cercano")
   extraEscalationKeywords?: string[]; // extra words that trigger a human handoff
   lessons?: string[];               // flywheel: rules distilled from owner takeovers
+  today?: string;                   // fecha/hora actual en la zona del negocio
 }
 
 const TEMPLATE = `<output_language>
@@ -32,6 +33,8 @@ Eres {{BOT_NAME}}, el asistente de {{BUSINESS_NAME}}. Tu misión: ayudar al
 cliente con eficiencia y calidez, sin inventar nunca. Conoces este negocio.
 Si una pregunta no tiene respuesta en lo que sabes, escalas a un humano.
 </role>
+
+{{CONTEXTO_TEMPORAL}}
 
 <business_context>
 {{BUSINESS_CONTEXT}}
@@ -122,7 +125,16 @@ ${lessons.map((l) => `- ${l}`).join("\n")}
 </lecciones_aprendidas>`
       : "";
 
+  const contextoTemporal = input.today
+    ? `<contexto_temporal>
+Hoy es ${input.today}. Tu conocimiento de entrenamiento tiene OTRA fecha — ignórala.
+Usa SIEMPRE esta fecha real para interpretar "hoy", "mañana", "el viernes", etc.,
+y para toda fecha que pases a las tools (citas, horarios).
+</contexto_temporal>`
+    : "";
+
   return TEMPLATE
+    .replaceAll("{{CONTEXTO_TEMPORAL}}", contextoTemporal)
     .replaceAll("{{LANGUAGE}}", input.language)
     .replaceAll("{{BOT_NAME}}", input.botName)
     .replaceAll("{{BUSINESS_NAME}}", input.businessName)
@@ -139,6 +151,24 @@ export interface SystemPromptOverrides {
   extraEscalationKeywords?: string[];
   botName?: string;
   lessons?: string[];
+}
+
+/** Fecha/hora actual legible + ISO en la zona del negocio (ancla "hoy"/"mañana"). */
+export function currentDateLine(timeZone: string): string {
+  const now = new Date();
+  const legible = new Intl.DateTimeFormat("es-MX", {
+    timeZone,
+    dateStyle: "full",
+    timeStyle: "short",
+  }).format(now);
+  // en-CA formatea YYYY-MM-DD, útil como fecha ISO para las tools.
+  const iso = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  return `${legible} (fecha ISO: ${iso}, zona horaria: ${timeZone})`;
 }
 
 export function systemPromptFromEnv(
@@ -158,5 +188,6 @@ export function systemPromptFromEnv(
     tone: overrides?.tone,
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
+    today: currentDateLine((env.CALCOM_TIMEZONE || "").trim() || "America/Mexico_City"),
   });
 }
