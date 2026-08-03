@@ -21,6 +21,16 @@ export function calcomTimeZone(env: Env): string {
   return (env.CALCOM_TIMEZONE || "").trim() || DEFAULT_TZ;
 }
 
+/** YYYY-MM-DD de hoy en la zona dada (en-CA formatea ISO). */
+export function todayInTz(timeZone: string): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 /**
  * Resuelve el eventTypeId para un servicio. Si hay un mapa CALCOM_EVENT_TYPES,
  * busca por coincidencia de palabra (case-insensitive); si no, usa el default.
@@ -78,7 +88,11 @@ export async function getAvailableSlots(
     const res = await fetch(url, {
       headers: { Authorization: `Bearer ${env.CALCOM_API_KEY}`, "cal-api-version": SLOTS_VERSION },
     });
-    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
+    if (!res.ok) {
+      // Logueamos el status para soporte, NO el body (puede traer datos del cliente).
+      console.warn(`[calcom] slots http_${res.status}`);
+      return { ok: false, reason: `http_${res.status}` };
+    }
     const body = (await res.json()) as { data?: Record<string, Slot[]> };
     const byDate = body.data ?? {};
     const slots = Object.values(byDate)
@@ -127,7 +141,11 @@ export async function createBooking(
         ...(args.notes ? { bookingFieldsResponses: { notes: args.notes } } : {}),
       }),
     });
-    if (!res.ok) return { ok: false, reason: `http_${res.status}` };
+    if (!res.ok) {
+      // Solo el status (el body del error puede traer nombre/email del cliente).
+      console.warn(`[calcom] booking http_${res.status}`);
+      return { ok: false, reason: `http_${res.status}` };
+    }
     const body = (await res.json()) as { data?: { id: number | string; uid?: string; status?: string; start?: string } };
     const d = body.data;
     if (!d?.id) return { ok: false, reason: "no_booking_id" };
