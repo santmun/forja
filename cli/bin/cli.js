@@ -605,6 +605,25 @@ function extractOver(buf, dir, slug, version) {
   writeMarker(dir, slug, version);
 }
 
+// Entrega los archivos DEFAULT nuevos de member/ que el miembro aún NO tenga
+// (create-if-missing), SIN pisar los suyos. Hace falta porque extractOver excluye
+// member/*.local.ts (preserva la personalización del miembro) — pero un archivo
+// NUEVO que el core del bot importa (p. ej. member/tools.local.ts, el punto de
+// extensión de tools) DEBE existir o el build truena. El contenido sale del propio
+// tarball: una sola fuente de verdad, sin duplicar el default en el CLI.
+const MEMBER_DEFAULTS = ["./member/tools.local.ts"];
+function ensureMemberDefaults(buf, dir) {
+  const missing = MEMBER_DEFAULTS.filter((rel) => !existsSync(join(dir, rel.slice(2))));
+  if (missing.length === 0) return;
+  const tgz = join(dir, ".artifact-def.tgz");
+  writeFileSync(tgz, buf);
+  try {
+    // --skip-old-files: jamás pisa uno existente (doble candado con el filtro de arriba).
+    execFileSync("tar", ["-xzf", tgz, "-C", dir, "--skip-old-files", ...missing]);
+  } catch { /* si el tarball no lo trae (artifact viejo), no rompemos el update */ }
+  rmSync(tgz, { force: true });
+}
+
 // Al actualizar con licencia de plan pagado, sube el BOT_TIER del wrangler.toml
 // del miembro a "pro" (el camino de upgrade tras activar Forja+): update --key
 // HZN-… + deploy = superpoderes prendidos. Nunca degrada (eso lo decide el
@@ -1152,6 +1171,7 @@ async function cmdUpdate(dirArg, flags) {
   const { buf, version } = await download(bot.slug, key);
   console.log(C.green("✓") + C.dim(` ${(buf.length / 1024).toFixed(0)} KB`));
   extractOver(buf, dir, bot.slug, version);
+  ensureMemberDefaults(buf, dir); // entrega defaults nuevos de member/ sin pisar los del miembro
   console.log(C.green(`\n  ✓ ${t().updDone(version)}\n`));
   if (bumpTierIfUpgraded(dir, v.plan)) {
     console.log("  " + C.yellow(t().updTierUp) + "\n");
