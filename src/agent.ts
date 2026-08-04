@@ -171,7 +171,15 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     // cf_agents_schedules table, so raw ctx.storage.setAlarm() alone won't
     // invoke our code. We upsert a fixed 'msg-buffer' row (so rapid messages
     // debounce to a single fire) and set the raw alarm as the trigger.
-    const alarmAt = Date.now() + cfg.bufferMs;
+    // Rescue for stranded messages: a Cloudflare alarm can silently fail to
+    // fire. When that happens the customer's message sits in the buffer until
+    // they write again — we saw a real customer wait 11 minutes before typing
+    // "Hola?". If the oldest buffered message is already older than 2x the
+    // normal wait, don't wait a whole buffer window again: process almost
+    // immediately.
+    const oldestAt = pending[0]?.receivedAt ?? Date.now();
+    const hasStranded = Date.now() - oldestAt > cfg.bufferMs * 2;
+    const alarmAt = Date.now() + (hasStranded ? 500 : cfg.bufferMs);
     const alarmAtSec = Math.floor(alarmAt / 1000);
     this.sql`
       INSERT OR REPLACE INTO cf_agents_schedules
@@ -180,6 +188,12 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
         ('msg-buffer', 'processBuffer', '{}', 'delayed', ${alarmAtSec}, unixepoch())
     `;
     await this.ctx.storage.setAlarm(alarmAt);
+    // Cheap guard against the lost alarm: if it didn't get registered, retry
+    // once and leave a trace in the log.
+    if ((await this.ctx.storage.getAlarm()) === null) {
+      console.error("[ingest] alarm was not armed — retrying");
+      await this.ctx.storage.setAlarm(alarmAt);
+    }
     this.setState({ ...this.state, lastAlarmAt: alarmAt });
 
     return { acknowledged: true };
