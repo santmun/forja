@@ -359,6 +359,67 @@ describe("SupportAgent.ingest — bot_paused (settings)", () => {
     expect(storage.setAlarm).not.toHaveBeenCalled();
   });
 
+  it("records the customer message when bot_paused=1, so the team can see it", async () => {
+    stubSettings({ bot_paused: "1" });
+    const { agent } = makeAgent({ tier: "free" });
+    stubConversations();
+    const append = vi
+      .spyOn(MessagesRepo.prototype, "append")
+      .mockResolvedValue(undefined as any);
+
+    await agent.ingest({
+      channel: "telegram",
+      channelUserId: "u1",
+      text: "hola, hay alguien?",
+    });
+
+    expect(append).toHaveBeenCalledWith("conv-1", "user", "hola, hay alguien?");
+    // El buffer no se toca: sigue igual que antes de este arreglo.
+    expect(agent.state.pendingMessages).toHaveLength(1);
+  });
+
+  it("records the customer message when the conversation is paused", async () => {
+    stubSettings();
+    const { agent, storage } = makeAgent({ tier: "free" });
+    stubConversations({ paused: true });
+    const append = vi
+      .spyOn(MessagesRepo.prototype, "append")
+      .mockResolvedValue(undefined as any);
+
+    await agent.ingest({
+      channel: "telegram",
+      channelUserId: "u1",
+      text: "sigo esperando",
+    });
+
+    expect(append).toHaveBeenCalledWith("conv-1", "user", "sigo esperando");
+    // El bot sigue callado.
+    expect(storage.setAlarm).not.toHaveBeenCalled();
+  });
+
+  it("records the voice note as text while paused, not as an empty message", async () => {
+    stubSettings();
+    const { agent } = makeAgent({ tier: "free", aiText: "hola desde un audio" });
+    stubConversations({ paused: true });
+    const append = vi
+      .spyOn(MessagesRepo.prototype, "append")
+      .mockResolvedValue(undefined as any);
+
+    await agent.ingest({
+      channel: "telegram",
+      channelUserId: "u1",
+      audioUrl: "https://example.com/voice.ogg",
+    });
+
+    // Media runs BEFORE the pause check, so what lands in the dashboard is
+    // readable text and not an empty row.
+    expect(append).toHaveBeenCalledTimes(1);
+    const [convId, role, text] = append.mock.calls[0];
+    expect(convId).toBe("conv-1");
+    expect(role).toBe("user");
+    expect(String(text).length).toBeGreaterThan(0);
+  });
+
   it("arms the alarm when bot is not paused", async () => {
     stubSettings();
     const { agent, storage } = makeAgent({ tier: "free" });
