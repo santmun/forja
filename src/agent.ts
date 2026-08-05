@@ -18,6 +18,7 @@ import { CustomerFactsRepo } from "./db/facts";
 import { createModel } from "./llm/provider";
 import { costOfUsage } from "./pricing";
 import type { ChannelId } from "./channels/shared";
+import { maskTelegramToken, unmaskTelegramToken } from "./telegramFiles";
 
 export interface SupportAgentState {
   conversationId: string | null;
@@ -141,7 +142,10 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       } else {
         processedText =
           (processedText || "(imagen sin caption)") +
-          `\n[IMAGE_URL: ${payload.imageUrl}]`;
+          // MASKED: a Telegram file URL carries the bot token inside, and this
+          // marker gets persisted in D1 (and shown in the dashboard, and
+          // included in exports). See src/telegramFiles.ts.
+          `\n[IMAGE_URL: ${maskTelegramToken(payload.imageUrl)}]`;
       }
     }
 
@@ -227,7 +231,12 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     if (lastUserMsg) {
       const imgMatch = lastUserMsg.content.match(/\[IMAGE_URL: (.+?)\]/);
       if (imgMatch && isPro(this.env)) {
-        const imageUrl = imgMatch[1];
+        // The token was masked before storing; it goes back in only here, to
+        // fetch the file. It never leaves this call.
+        const imageUrl = unmaskTelegramToken(
+          imgMatch[1],
+          this.env.TELEGRAM_BOT_TOKEN,
+        );
         const cleanText = lastUserMsg.content
           .replace(/\n?\[IMAGE_URL: .+?\]/, "")
           .trim();
