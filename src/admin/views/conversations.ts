@@ -316,7 +316,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
 
   return `
   ${header}
-  <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--bg)">
+  <div id="msgscroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--bg)">
     ${bubbles || `<div style="text-align:center;font-size:12.5px;color:var(--dim);padding:32px 0">Sin mensajes.</div>`}
   </div>`;
 }
@@ -403,7 +403,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
     rightPane = `
       <div id="thread-live" class="flex flex-col flex-1 min-h-0"
            hx-get="/admin/conversations/thread/${encodeURIComponent(p.selectedId)}"
-           hx-trigger="every 5s" hx-swap="innerHTML">
+           hx-trigger="every 5s[window.puedeRefrescar('msgscroll')]" hx-swap="innerHTML">
         ${thread}
       </div>
       ${renderComposer(p.selectedId)}`;
@@ -433,7 +433,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
     <div class="grid grid-cols-1 md:grid-cols-[320px_1fr] overflow-hidden" style="border:1px solid var(--line);background:var(--panel);height:calc(100vh - 200px);min-height:480px">
       <div class="border-r border-line flex flex-col" style="min-height:0">
         <div id="conv-list" class="overflow-y-auto flex-1"
-             hx-get="${listPollUrl}" hx-trigger="every 10s" hx-swap="innerHTML">
+             hx-get="${listPollUrl}" hx-trigger="every 10s[window.puedeRefrescar('conv-list')]" hx-swap="innerHTML">
           ${list}
         </div>
       </div>
