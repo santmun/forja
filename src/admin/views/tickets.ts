@@ -2,6 +2,7 @@ import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { TicketsRepo } from "../../db/tickets";
 import { layout } from "./layout";
+import { fmtDateTime } from "../format";
 
 const STATUS_PILL: Record<string, string> = {
   open: "var(--bad)",
@@ -14,7 +15,7 @@ export async function renderTickets(env: Env): Promise<string> {
 
   const list = open
     .map((t) => {
-      const date = new Date(t.created_at).toLocaleString("es-MX");
+      const date = fmtDateTime(t.created_at);
       const pillColor = STATUS_PILL[t.status] ?? "var(--muted)";
       return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">

@@ -3,6 +3,7 @@ import { Db } from "../../db/client";
 import { LeadsRepo, leadMetadata, type Lead } from "../../db/leads";
 import { getNiche } from "../../niches";
 import { layout } from "./layout";
+import { fmtDate, fmtDateTime } from "../format";
 
 // Escapa texto del LLM/cliente antes de meterlo en HTML (el intent y las notas
 // pueden traer <, &, links pegados por el cliente, etc.).
@@ -26,7 +27,7 @@ export async function renderLeads(env: Env): Promise<string> {
   // Columnas: núcleo (fecha, nombre, contacto) + o bien las columnas del nicho
   // (leídas de metadata) o bien el "Resumen" genérico + estado (re-etiquetado).
   const cols: Col[] = [
-    { h: "Fecha", w: "94px", cell: (l) => `<span class="text-dim">${new Date(l.created_at).toLocaleDateString("es-MX")}</span>` },
+    { h: "Fecha", w: "94px", cell: (l) => `<span class="text-dim">${fmtDate(l.created_at)}</span>` },
     { h: "Nombre", w: "minmax(120px,1.1fr)", cell: (l) => `<span class="text-cream" style="display:flex;align-items:center;gap:7px"><i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${esc(l.name) || "(sin nombre)"}</span>` },
     { h: "Contacto", w: "minmax(110px,1fr)", cell: (l) => `<span class="text-muted">${esc(l.contact) || "—"}</span>` },
   ];
@@ -56,7 +57,7 @@ export async function renderLeads(env: Env): Promise<string> {
   const rows = list
     .map((l) => {
       const meta = leadMetadata(l);
-      const fullDate = new Date(l.created_at).toLocaleString("es-MX");
+      const fullDate = fmtDateTime(l.created_at);
       const convLink = l.conversation_id
         ? `<a href="/admin/conversations?c=${encodeURIComponent(l.conversation_id)}" class="text-accent" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;text-decoration:none">
              <i data-lucide="messages-square" width="13" height="13"></i> Ver conversación completa
