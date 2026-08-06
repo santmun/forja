@@ -18,6 +18,7 @@ import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { fmtDateTime } from "../format";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -270,7 +271,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
   // Messages, DESC in the DOM + column-reverse = pinned to bottom.
   const bubbles = msgs
     .map((m) => {
-      const time = new Date(m.created_at).toLocaleString("es-MX", {
+      const time = fmtDateTime(m.created_at, {
         day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
       });
 
