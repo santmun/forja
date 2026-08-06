@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { chunkReply } from "../../src/replies/chunker";
+import { chunkReply, stripMarkdown } from "../../src/replies/chunker";
 
 describe("chunkReply", () => {
   it("returns single chunk for short text", () => {
@@ -34,5 +34,23 @@ describe("chunkReply", () => {
     const joined = chunks.join(" ").replace(/\s+/g, " ");
     const original = text.replace(/\s+/g, " ");
     expect(joined).toBe(original);
+  });
+
+  it("strips Markdown before sending (no channel renders it)", () => {
+    expect(stripMarkdown("**PAQUETE BASE**")).toBe("PAQUETE BASE");
+    expect(stripMarkdown("hola __mundo__")).toBe("hola mundo");
+    expect(stripMarkdown("usa `codigo` aquí")).toBe("usa codigo aquí");
+    expect(stripMarkdown("# Título")).toBe("Título");
+    expect(stripMarkdown("- uno\n- dos")).toBe("• uno\n• dos");
+    expect(stripMarkdown("* item")).toBe("• item");
+  });
+
+  it("leaves plain text and numbered lists untouched", () => {
+    expect(stripMarkdown("Precio: $250 (2 x $125)")).toBe("Precio: $250 (2 x $125)");
+    expect(stripMarkdown("1. Primero\n2. Segundo")).toBe("1. Primero\n2. Segundo");
+  });
+
+  it("chunkReply sanitizes Markdown in its output", () => {
+    expect(chunkReply("**Hola** María")).toEqual(["Hola María"]);
   });
 });
