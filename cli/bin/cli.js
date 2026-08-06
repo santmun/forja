@@ -618,8 +618,11 @@ function ensureMemberDefaults(buf, dir) {
   const tgz = join(dir, ".artifact-def.tgz");
   writeFileSync(tgz, buf);
   try {
-    // --skip-old-files: jamás pisa uno existente (doble candado con el filtro de arriba).
-    execFileSync("tar", ["-xzf", tgz, "-C", dir, "--skip-old-files", ...missing]);
+    // Solo extraemos los que NO existen (el filtro existsSync de arriba ya lo
+    // garantiza), así que no hay nada que pisar. NADA de --skip-old-files: es un
+    // flag solo-GNU y el tar de macOS (BSD) lo rechaza → el update fallaba callado
+    // en Mac y el stub nunca se creaba (reportado por Pedro/PeeterDigital).
+    execFileSync("tar", ["-xzf", tgz, "-C", dir, ...missing]);
   } catch { /* si el tarball no lo trae (artifact viejo), no rompemos el update */ }
   rmSync(tgz, { force: true });
 }
