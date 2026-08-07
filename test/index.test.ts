@@ -29,4 +29,41 @@ describe("Worker entry", () => {
     const res = await worker.fetch(new Request("https://test/nope"), env, {} as any);
     expect(res.status).toBe(404);
   });
+
+  describe("POST /kb/reindex", () => {
+    const pedir = (headers: Record<string, string>, entorno: any = env) =>
+      worker.fetch(
+        new Request("https://test/kb/reindex", { method: "POST", headers }),
+        entorno,
+        {} as any,
+      );
+
+    it("responde unauthorized cuando el secret no está configurado", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const res = await pedir({ "X-Reindex-Token": "loquesea" });
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, error: "unauthorized" });
+
+      // El cuerpo no distingue este caso del token equivocado — a propósito, para
+      // no regalarle a quien llama el estado del Worker. Pero el dueño tiene que
+      // poder distinguirlo desde `wrangler tail`, y ahí es donde va el aviso.
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("KB_REINDEX_TOKEN"));
+      warn.mockRestore();
+    });
+
+    it("responde unauthorized cuando el token no coincide, sin avisar al log", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      const res = await pedir({ "X-Reindex-Token": "equivocado" }, {
+        ...env,
+        KB_REINDEX_TOKEN: "el-bueno",
+      });
+
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ ok: false, error: "unauthorized" });
+      // Acá el Worker sí está configurado: no hay nada que avisarle al dueño.
+      expect(warn).not.toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
 });
