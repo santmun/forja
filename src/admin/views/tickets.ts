@@ -31,6 +31,17 @@ export async function renderTickets(env: Env): Promise<string> {
           <button class="bigbtn font-display font-bold text-[11.5px] cursor-pointer"
                   style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:9px 16px">Resolver</button>
         </form>
+
+        <!-- Borrar es DISTINTO de resolver: resolver conserva el registro con su
+             historia, borrar lo saca para siempre. Por eso va en un formulario
+             aparte, en gris y sin destacar: es la acción secundaria, para
+             tickets de prueba o abiertos por error. El confirm() es la única
+             red — no hay deshacer. -->
+        <form method="POST" action="/admin/tickets/${t.id}/delete" style="margin-top:8px"
+              onsubmit="return confirm('¿Borrar este ticket para siempre? No se puede deshacer.')">
+          <button class="ghostbtn font-display text-[11px] cursor-pointer"
+                  style="padding:7px 13px">Eliminar</button>
+        </form>
       </div>`;
     })
     .join("");
