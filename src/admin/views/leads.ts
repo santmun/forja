@@ -50,6 +50,20 @@ export async function renderLeads(env: Env): Promise<string> {
     </form>`,
   });
 
+  // Columna de borrado. Angosta y al final, en gris: es irreversible y no debe
+  // competir con el selector de estado, que es la acción del día a día.
+  // `event.stopPropagation()` evita que el clic abra el detalle de la fila.
+  cols.push({
+    h: "",
+    w: "56px",
+    cell: (l) => `<form method="POST" action="/admin/leads/${l.id}/delete"
+          onclick="event.stopPropagation()"
+          onsubmit="return confirm('¿Borrar este lead para siempre? No se puede deshacer.')">
+      <button class="ghostbtn cursor-pointer" title="Eliminar lead"
+              style="padding:5px 9px;font-size:11px">×</button>
+    </form>`,
+  });
+
   const gridCols = cols.map((c) => c.w).join(" ");
   const minWidth = 640 + niche.columns.length * 90; // asegura el scroll horizontal cuando hay muchas columnas
 

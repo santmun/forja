@@ -538,6 +538,30 @@ adminApp.post("/tickets/:id/resolve", async (c) => {
   return c.redirect("/admin/tickets");
 });
 
+// Borrar un ticket para siempre. Distinto de resolver: resolver conserva el
+// registro con su historia, borrar lo saca. Es para tickets de prueba o
+// abiertos por error.
+adminApp.post("/tickets/:id/delete", async (c) => {
+  await new TicketsRepo(new Db(c.env.DB)).delete(c.req.param("id"));
+  return c.redirect("/admin/tickets");
+});
+
+// Borrar un lead para siempre. Distinto de marcarlo "perdido": ese estado
+// conserva el contacto y sirve para medir. Esto lo saca de la base — para leads
+// de prueba, duplicados, o cuando la persona pide que borren sus datos.
+adminApp.post("/leads/:id/delete", async (c) => {
+  await new LeadsRepo(new Db(c.env.DB)).delete(c.req.param("id"));
+  return c.redirect("/admin/leads");
+});
+
+// Borrar una conversación con todo lo suyo (mensajes, insights, hechos,
+// seguimientos y sus tickets). Los LEADS se conservan: son un activo del
+// negocio y no deben desaparecer sin avisar — solo se les corta el vínculo.
+adminApp.post("/conversations/:id/delete", async (c) => {
+  await new ConversationsRepo(new Db(c.env.DB)).delete(c.req.param("id"));
+  return c.redirect("/admin/conversations");
+});
+
 // --- Inbox actions (F1) -------------------------------------------------------
 
 /** Owner takes over for this long after replying/pausing from the dashboard. */
