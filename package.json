@@ -29,12 +29,12 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
-    "@types/node": "latest",
-    "miniflare": "latest",
-    "tsx": "latest",
+    "@cloudflare/workers-types": "^4.20260531.1",
+    "@types/node": "^25.9.1",
+    "miniflare": "^4.20260526.0",
+    "tsx": "^4.22.3",
     "typescript": "^5",
-    "vitest": "latest",
-    "wrangler": "latest"
+    "vitest": "^4.1.7",
+    "wrangler": "^4.95.0"
   }
 }
