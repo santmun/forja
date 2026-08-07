@@ -37,25 +37,25 @@ importers:
         version: 4.4.3
     devDependencies:
       '@cloudflare/workers-types':
-        specifier: latest
+        specifier: ^4.20260531.1
         version: 4.20260531.1
       '@types/node':
-        specifier: latest
+        specifier: ^25.9.1
         version: 25.9.1
       miniflare:
-        specifier: latest
+        specifier: ^4.20260526.0
         version: 4.20260526.0(bufferutil@4.1.0)(utf-8-validate@5.0.10)
       tsx:
-        specifier: latest
+        specifier: ^4.22.3
         version: 4.22.3
       typescript:
         specifier: ^5
         version: 5.9.3
       vitest:
-        specifier: latest
+        specifier: ^4.1.7
         version: 4.1.7(@opentelemetry/api@1.9.1)(@types/node@25.9.1)(vite@8.0.14(@types/node@25.9.1)(esbuild@0.28.0)(tsx@4.22.3))
       wrangler:
-        specifier: latest
+        specifier: ^4.95.0
         version: 4.95.0(@cloudflare/workers-types@4.20260531.1)(bufferutil@4.1.0)(utf-8-validate@5.0.10)
 
 packages:
