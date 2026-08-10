@@ -961,10 +961,14 @@ function installAgentSkill(flags = {}) {
   try {
     const dir = join(homedir(), ".claude", "skills", "forja");
     const file = join(dir, "SKILL.md");
-    const existed = existsSync(file);
+    let prev = null;
+    try { prev = readFileSync(file, "utf8"); } catch {}
+    if (prev === AGENT_SKILL) return;   // ya al dia: nada que hacer (ni ruido)
     mkdirSync(dir, { recursive: true });
     writeFileSync(file, AGENT_SKILL);
-    if (!existed) console.log(C.dim("  \u270e guía de Forja instalada para tu agente  \u2192  ~/.claude/skills/forja/"));
+    console.log(C.dim(prev == null
+      ? "  \u270e guía de Forja instalada para tu agente  \u2192  ~/.claude/skills/forja/"
+      : "  \u270e guía de tu agente actualizada (canales y comandos nuevos)"));
   } catch { /* no romper el flujo por esto */ }
 }
 
@@ -1150,6 +1154,7 @@ async function cmdUpdate(dirArg, flags) {
   if (!dir) { console.log("  " + C.red(t().noBotHere) + "\n"); process.exit(1); }
   const marker = JSON.parse(readFileSync(join(dir, MARKER), "utf8"));
   if (marker.lang && DICT[marker.lang]) L = marker.lang;   // respeta el idioma con que se instaló
+  installAgentSkill(flags);   // el skill vive en el CLI, no en el bot: cada update lo pone al dia (Zernio, delete...)
   const key = keyFrom(flags, cfg);
   if (!key) { console.log("  " + C.red(t().needKey) + "\n"); process.exit(1); }
 
