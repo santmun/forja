@@ -209,6 +209,79 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
 
 // --- Right pane: live thread (header + messages, polled) ----------------------
 
+
+/**
+ * LA BARRA DE ARRIBA DEL CHAT.
+ *
+ * Tres problemas que resuelve:
+ *
+ *  1. Los botones se corrían de lugar según cuántas etiquetas tuviera ese chat
+ *     (ticket abierto, pausado, la emoción del cliente). Abres dos
+ *     conversaciones seguidas y "Pausar" no está en el mismo sitio.
+ *  2. La barra ocupaba DOS filas y se comía alto de pantalla en cada chat.
+ *  3. Forzarla a una fila rompía el panel en pantallas medianas: el chat entero
+ *     se salía por la derecha, con el botón cortado por la mitad.
+ *
+ * Ahora son tres bloques fijos —QUIÉN · MARCAS · ACCIONES, las acciones siempre
+ * pegadas a la derecha y siempre en el mismo orden— y la fila única se PIDE,
+ * solo si el chat mide lo suficiente.
+ *
+ * ✱ LO CONTRAINTUITIVO: acortar el TEXTO de los botones no ahorra alto. Medido
+ *   en el navegador: 82 px antes y 82 px después. Lo que ahorra es que quepa en
+ *   UNA fila — ahí baja a 47 px.
+ *
+ * ✱ Se mide el ancho del CHAT (container query), no el de la ventana: entre el
+ *   menú y la lista se van ~570 px, así que una pantalla "grande" puede dejar
+ *   un chat estrecho. Con una media query normal esto falla justo en las
+ *   pantallas de escritorio medianas.
+ *
+ * ✱ El umbral se MIDE, no se pone a ojo: se le da width:max-content a los tres
+ *   bloques y se lee lo que ocupan de verdad.
+ *
+ * ✱ El bloque del nombre lleva min-width: sin él, con varias etiquetas a la vez
+ *   se recortaba hasta DESAPARECER y quedaban solo el avatar y el número.
+ */
+const ESTILO_CABECERA = `<style>
+  .hilo-barra{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;
+    padding:11px 16px;min-width:0;max-width:100%;
+    border-bottom:1px solid var(--line);background:var(--panel)}
+  .hilo-quien{display:flex;align-items:center;gap:8px;min-width:0;flex:1 1 140px;overflow:hidden}
+  .hilo-marcas{display:flex;align-items:center;gap:6px;flex:none}
+  .hilo-acciones{display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+    width:100%;justify-content:flex-end}
+
+  /* La cadena ENTERA necesita min-width:0 para poder encogerse: basta que un
+     eslabón lo olvide para que un nombre largo lo empuje todo fuera. */
+  .hilo-quien > span:first-child{
+    display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* Ninguna etiqueta parte en dos renglones: si una se parte, la barra crece y
+     el chat de al lado se ve distinto. */
+  .hilo-barra span, .hilo-barra a, .hilo-barra button, .hilo-barra summary{white-space:nowrap}
+
+  /* Mientras la barra está en dos filas, un cuadro desplegable se adueña de su
+     fila en vez de flotar: anclado a la derecha se salía de la pantalla en el
+     teléfono. Lleva !important porque los elementos traen position/width
+     escritos en su propio atributo style. */
+  .hilo-acciones details[open]{width:100%;position:static}
+  .hilo-acciones details[open] > div{
+    position:static !important;width:auto !important;max-width:none !important;box-shadow:none}
+
+  @container (min-width: 620px) {
+    .hilo-barra{flex-wrap:nowrap}
+    .hilo-quien{flex:0 1 auto;min-width:150px}
+    .hilo-acciones{width:auto;flex-wrap:nowrap;margin-left:auto}
+    .hilo-acciones details[open]{width:auto;position:relative}
+    .hilo-acciones details[open] > div{
+      position:absolute !important;max-width:78vw !important;
+      box-shadow:6px 6px 0 rgba(0,0,0,.4)}
+  }
+
+  @media (max-width:767px){
+    .hilo-barra{padding:8px 10px;gap:6px 8px}
+  }
+</style>`;
+
 export async function renderThreadLive(env: Env, convId: string): Promise<string> {
   const db = new Db(env.DB);
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ?", [convId]);
@@ -253,18 +326,25 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     </details>`
     : `
     <button hx-post="/admin/conversations/${encodeURIComponent(convId)}/pause" hx-target="#thread-live" hx-swap="innerHTML"
-            class="chip" style="margin-left:auto;font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;cursor:pointer">
+            class="chip" style="font-size:11px;color:var(--muted);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;cursor:pointer">
       ⏸ Pausar bot aquí
     </button>`;
 
   const header = `
-  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)">
-    <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name ?? conv.channel_user_id)}</span>
-    <span style="${smallPill("var(--info)")}">${escapeHtml(channelLabel(conv.channel))}</span>
-    ${statusPill}
-    ${sentBadge}
-    ${openTicket > 0 ? `<span style="${statusBadge("var(--accent-2)")}">🔔 ticket abierto</span>` : ""}
-    ${controls}
+  ${ESTILO_CABECERA}
+  <div class="hilo-barra">
+    <div class="hilo-quien">
+      <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name ?? conv.channel_user_id)}</span>
+    </div>
+    <div class="hilo-marcas">
+      <span style="${smallPill("var(--info)")}">${escapeHtml(channelLabel(conv.channel))}</span>
+      ${openTicket > 0 ? `<span style="${statusBadge("var(--accent-2)")}">🔔</span>` : ""}
+      ${sentBadge}
+      ${statusPill}
+    </div>
+    <div class="hilo-acciones">
+      ${controls}
+    </div>
   </div>`;
 
   // Messages, DESC in the DOM + column-reverse = pinned to bottom.
@@ -292,7 +372,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       if (m.role === "user") {
         return `
         <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
-          <div style="background:var(--panel2);border:1px solid var(--line);padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
+          <div style="background:var(--panel2);border:1px solid var(--line);padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;color:var(--cream)">${escapeHtml(m.content)}</div>
           <span style="font-size:9.5px;color:var(--dim)">${time}</span>
         </div>`;
       }
@@ -308,7 +388,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       return `
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:78%;margin-left:auto">
         ${chips}
-        <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
+        <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0;color:var(--cream)">${escapeHtml(m.content)}</div>
         <span style="font-size:9.5px;color:var(--dim)">${meta}</span>
       </div>`;
     })
@@ -401,7 +481,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
   if (p.selectedId) {
     const thread = await renderThreadLive(env, p.selectedId);
     rightPane = `
-      <div id="thread-live" class="flex flex-col flex-1 min-h-0"
+      <div id="thread-live" class="flex flex-col flex-1 min-h-0" style="container-type:inline-size;min-width:0"
            hx-get="/admin/conversations/thread/${encodeURIComponent(p.selectedId)}"
            hx-trigger="every 5s" hx-swap="innerHTML">
         ${thread}
