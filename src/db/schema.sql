@@ -203,3 +203,17 @@ CREATE TABLE IF NOT EXISTS template_sends (
   UNIQUE (campaign_key, conversation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_template_sends_time ON template_sends(sent_at);
+
+CREATE TABLE IF NOT EXISTS reportes (
+  id TEXT PRIMARY KEY,
+  tipo TEXT NOT NULL DEFAULT 'error',
+  texto TEXT NOT NULL,
+  reportado_por TEXT,
+  conversation_id TEXT,
+  estado TEXT NOT NULL DEFAULT 'abierto',
+  respuesta TEXT,
+  created_at INTEGER NOT NULL,
+  resuelto_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_reportes_estado ON reportes(estado, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_reportes_conv ON reportes(conversation_id);

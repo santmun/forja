@@ -18,6 +18,7 @@ import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { formularioReporte } from "./reportes";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -257,6 +258,21 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       ⏸ Pausar bot aquí
     </button>`;
 
+  // REPORTAR DESDE EL CHAT — el caso de uso real del buzón. Quien atiende ve una
+  // respuesta mala y la reporta AQUÍ MISMO, con el chat ya enganchado: no tiene
+  // que ir a otra pestaña a explicar de qué conversación hablaba.
+  //
+  // Es un <details> con el formulario dentro, para no sacar a nadie del hilo.
+  const botonReportar = `
+    <details style="position:relative">
+      <summary class="chip" style="cursor:pointer;list-style:none;font-size:11px;color:var(--bad);background:transparent;border:1px solid var(--bad);padding:6px 11px;display:inline-flex;align-items:center;gap:6px;white-space:nowrap"
+               title="Avisar de una respuesta mala o proponer una mejora">⚑ Reportar</summary>
+      <div style="position:absolute;right:0;z-index:10;margin-top:8px;width:330px;max-width:78vw;background:var(--panel);border:1px solid var(--linelit);box-shadow:6px 6px 0 rgba(0,0,0,.4);padding:13px">
+        <p style="font-size:11.5px;color:var(--muted);margin:0 0 9px;line-height:1.5">¿El bot respondió mal aquí? Cuéntalo y queda guardado en el <b style="color:var(--cream)">Buzón</b> con el enlace a este chat.</p>
+        ${formularioReporte({ conversationId: conv.id, htmx: true, compacto: true })}
+      </div>
+    </details>`;
+
   const header = `
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)">
     <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name ?? conv.channel_user_id)}</span>
@@ -265,6 +281,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     ${sentBadge}
     ${openTicket > 0 ? `<span style="${statusBadge("var(--accent-2)")}">🔔 ticket abierto</span>` : ""}
     ${controls}
+    ${botonReportar}
   </div>`;
 
   // Messages, DESC in the DOM + column-reverse = pinned to bottom.
