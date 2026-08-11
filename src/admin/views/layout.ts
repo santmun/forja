@@ -348,9 +348,13 @@ export function layout(opts: { title: string; activeTab: string; body: string; e
     d.peers.forEach(function(p){
       opts += '<option value="' + p.url.replace(/"/g,'&quot;') + '">' + p.name.replace(/</g,'&lt;') + '</option>';
     });
-    el.innerHTML = '<select onchange="if(this.value.indexOf(\'http\')===0)window.location=this.value" ' +
+    // Las comillas simples van como &#39;: este bloque vive dentro de un
+    // template literal, así que los \' del código fuente NO llegan al navegador
+    // y cerraban la cadena JS de golpe (SyntaxError en cada carga del panel).
+    // El parser de HTML las decodifica antes de que corran el onchange y el CSS.
+    el.innerHTML = '<select onchange="if(this.value.indexOf(&#39;http&#39;)===0)window.location=this.value" ' +
       'style="background:rgba(20,16,9,.9);color:var(--fg,#e8e0cf);border:1px solid var(--line);border-radius:8px;' +
-      'padding:6px 10px;font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:.04em;cursor:pointer" ' +
+      'padding:6px 10px;font-family:&#39;JetBrains Mono&#39;,monospace;font-size:11px;letter-spacing:.04em;cursor:pointer" ' +
       'title="Cambiar de proyecto">' + opts + '</select>';
   }).catch(function(){});
   </script>
