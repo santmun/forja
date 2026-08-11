@@ -50,7 +50,7 @@ import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
-import { MessagesRepo } from "../db/messages";
+import { esNotaInterna, sinMarcaNota, MARCA_NOTA, MessagesRepo } from "../db/messages";
 import { SettingsRepo, SETTING_KEYS, type SettingKey } from "../db/settings";
 import { CONTROLS, levelToValue } from "./control-levels";
 import { systemPromptFromEnv } from "../system-prompt";
@@ -608,12 +608,18 @@ adminApp.post("/conversations/:id/resume", async (c) => {
   // has context when it picks the conversation back up. The summary field is
   // optional, so tolerate a request with no form body (formData() throws on an
   // empty/no-content-type body).
+  //
+  // La nota se guarda SOLO si de verdad se escribió algo. Antes se metía una de
+  // oficio, y en el hilo aparecía un mensaje que nadie había escrito.
+  //
+  // Y va MARCADA (MARCA_NOTA): no se le envió a nadie, así que ni el panel ni el
+  // bot pueden tratarla como un mensaje del chat.
   const form = await c.req.formData().catch(() => null);
-  const summary =
-    String(form?.get("summary") ?? "").trim() ||
-    "(El dueño habló con el cliente y resolvió la consulta.)";
-  const msgs = new MessagesRepo(new Db(c.env.DB));
-  await msgs.append(id, "owner", summary);
+  const summary = String(form?.get("summary") ?? "").trim();
+  if (summary) {
+    const msgs = new MessagesRepo(new Db(c.env.DB));
+    await msgs.append(id, "owner", `${MARCA_NOTA} ${summary}`);
+  }
   return c.redirect(`/admin/conversations?c=${encodeURIComponent(id)}`);
 });
 
@@ -638,12 +644,21 @@ adminApp.post("/conversations/:id/suggest", async (c) => {
   const msgs = new MessagesRepo(new Db(c.env.DB));
   const history = await msgs.lastN(c.req.param("id"), 20);
   const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env));
-  const aiMessages = history.map((m) => ({
-    role: (m.role === "tool" ? "user" : m.role === "owner" ? "assistant" : m.role) as
-      | "user"
-      | "assistant",
-    content: m.content,
-  }));
+  // Una nota interna no es una respuesta del bot: si se le pasa como suya, el
+  // co-pilot sugiere cosas que dan por hecho que el cliente leyó algo que nunca vio.
+  const aiMessages = history.map((m) =>
+    m.role === "owner" && esNotaInterna(m.content)
+      ? {
+          role: "user" as const,
+          content: `(Nota interna del equipo. El cliente NO vio esto: ${sinMarcaNota(m.content)})`,
+        }
+      : {
+          role: (m.role === "tool" ? "user" : m.role === "owner" ? "assistant" : m.role) as
+            | "user"
+            | "assistant",
+          content: m.content,
+        },
+  );
   aiMessages.push({
     role: "user",
     content:
