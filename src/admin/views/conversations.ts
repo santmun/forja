@@ -242,13 +242,17 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
   const controls = paused
     ? `
     <details style="position:relative;margin-left:auto">
-      <summary class="chip" style="cursor:pointer;list-style:none;font-size:11px;color:var(--accent-2);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;display:inline-flex;align-items:center;gap:6px">▸ Devolver al bot</summary>
+      <summary class="chip"
+               hx-post="/admin/conversations/${encodeURIComponent(convId)}/resume"
+               hx-swap="none"
+               title="Devolver el bot: vuelve a responder en este chat"
+               style="cursor:pointer;list-style:none;font-size:11px;color:var(--accent-2);background:var(--panel2);border:1px solid var(--linelit);padding:6px 11px;display:inline-flex;align-items:center;gap:6px">▸ Devolver bot</summary>
       <form method="POST" action="/admin/conversations/${encodeURIComponent(convId)}/resume"
             style="position:absolute;right:0;z-index:10;margin-top:8px;width:280px;background:var(--panel);border:1px solid var(--linelit);box-shadow:6px 6px 0 rgba(0,0,0,.4);padding:12px">
         <p style="font-size:11px;color:var(--muted);margin:0 0 8px">Cuéntale al bot qué resolviste para que siga con contexto.</p>
         <textarea name="summary" rows="3" required placeholder="Ej. Ya le confirmé su pago y le di acceso."
                   style="width:100%;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:8px 10px;font-size:12px;outline:none;resize:vertical;margin-bottom:8px"></textarea>
-        <button class="bigbtn" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:9px;font-size:12px;font-weight:700;font-family:'Space Grotesk';cursor:pointer">Devolver al bot</button>
+        <button class="bigbtn" style="width:100%;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:3px 3px 0 var(--linelit);padding:9px;font-size:12px;font-weight:700;font-family:'Space Grotesk';cursor:pointer">Enviar al bot</button>
       </form>
     </details>`
     : `
