@@ -328,7 +328,7 @@ function renderComposer(convId: string): string {
   return `
   <div style="border-top:1px solid var(--line);background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:8px">
     <div id="suggestion-box"></div>
-    <form hx-post="/admin/conversations/${id}/reply" hx-target="#send-status" hx-swap="innerHTML"
+    <form id="fila-escribir" hx-post="/admin/conversations/${id}/reply" hx-target="#send-status" hx-swap="innerHTML"
           hx-on::after-request="if(event.detail.xhr.getResponseHeader('X-Sent')==='1')this.reset()"
           style="display:flex;align-items:flex-end;gap:9px">
       <textarea name="text" id="reply-text" rows="2" required
@@ -338,13 +338,176 @@ function renderComposer(convId: string): string {
               class="chip" style="background:var(--panel2);border:1px solid var(--linelit);color:var(--accent-2);padding:11px 13px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px" title="El co-pilot sugiere una respuesta">
         <i data-lucide="sparkles" width="13" height="13"></i> Sugerir
       </button>
+      <button type="button" id="btn-grabar" class="chip"
+              style="background:var(--panel2);border:1px solid var(--linelit);color:var(--accent-2);width:42px;height:42px;flex:none;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center"
+              title="Grabar una nota de voz, enviarla y pausar el bot">
+        <i data-lucide="mic" width="15" height="15"></i>
+      </button>
       <button type="submit" class="bigbtn" style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:4px 4px 0 var(--linelit);padding:11px 18px;font-size:12.5px;font-weight:700;font-family:'Space Grotesk';cursor:pointer;white-space:nowrap;display:flex;align-items:center;gap:6px">
         Enviar <i data-lucide="send" width="14" height="14"></i>
       </button>
     </form>
+    ${BARRA_GRABANDO}
+    <form id="form-audio" hx-post="/admin/conversations/${id}/audio" hx-target="#send-status"
+          hx-swap="innerHTML" hx-encoding="multipart/form-data" style="display:none">
+      <input type="file" name="audio" id="campo-audio" accept="audio/*">
+    </form>
     <div id="send-status" style="font-size:11px;min-height:1rem;color:var(--muted)"></div>
+    ${SCRIPT_GRABADORA}
   </div>`;
 }
+
+/**
+ * LA BARRA DE GRABACIÓN, con los controles que la gente ya conoce de WhatsApp.
+ *
+ * Mientras se graba OCUPA EL SITIO del cuadro de escribir: papelera para
+ * descartar, pausa/seguir, el tiempo corriendo y el avioncito para enviar. Sin
+ * papelera, grabarse por error y no poder borrarlo sin enviarlo es una trampa —
+ * y en el celular no existe la tecla Escape.
+ */
+const BARRA_GRABANDO = `
+    <div id="barra-grabando" style="display:none;align-items:center;gap:10px">
+      <button type="button" id="grab-tirar" title="Descartar la grabación"
+              style="background:transparent;border:1px solid var(--bad);color:var(--bad);width:42px;height:42px;flex:none;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <i data-lucide="trash-2" width="15" height="15"></i>
+      </button>
+      <button type="button" id="grab-pausa" title="Pausar o seguir grabando"
+              style="flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);color:var(--cream);height:42px;padding:0 14px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;font-size:12.5px">
+        <i data-lucide="pause" width="14" height="14" id="grab-icono-pausa"></i>
+        <i data-lucide="play" width="14" height="14" id="grab-icono-seguir" style="display:none"></i>
+        <span id="grab-etiqueta">Pausar</span>
+        <span id="grab-tiempo" style="margin-left:auto;font-variant-numeric:tabular-nums;color:var(--muted)">0:00</span>
+      </button>
+      <button type="button" id="grab-enviar" title="Enviar la nota de voz"
+              style="background:var(--accent);border:1px solid var(--accent);color:#1a1206;width:42px;height:42px;flex:none;padding:0;cursor:pointer;display:flex;align-items:center;justify-content:center">
+        <i data-lucide="send" width="15" height="15"></i>
+      </button>
+    </div>`;
+
+/**
+ * La grabadora del navegador.
+ *
+ * EL ORDEN DE FORMATOS IMPORTA:
+ *  1. ogg/opus — lo que WhatsApp quiere; solo lo graba Firefox.
+ *  2. webm/opus — lo de Chrome. MISMO sonido, otra caja: el worker le cambia la
+ *     caja a ogg y sale como nota de voz de verdad (media/oggOpus).
+ *  3. mp4 — último recurso. Chrome lo graba fragmentado y WhatsApp no lo
+ *     entrega; se manda como adjunto.
+ *
+ * Y hay que SOLTAR EL MICRÓFONO al terminar (`track.stop()`): si no, el
+ * navegador se queda con la luz de "grabando" encendida.
+ */
+const SCRIPT_GRABADORA = `
+<script>
+(function(){
+  var boton = document.getElementById('btn-grabar');
+  if (!boton) return;
+  var estado = document.getElementById('send-status');
+  var campo = document.getElementById('campo-audio');
+  var formulario = document.getElementById('form-audio');
+  var fila = document.getElementById('fila-escribir');
+  var barra = document.getElementById('barra-grabando');
+  var btnTirar = document.getElementById('grab-tirar');
+  var btnPausa = document.getElementById('grab-pausa');
+  var btnEnviar = document.getElementById('grab-enviar');
+  var etiqueta = document.getElementById('grab-etiqueta');
+  var tiempo = document.getElementById('grab-tiempo');
+  var iconoPausa = document.getElementById('grab-icono-pausa');
+  var iconoSeguir = document.getElementById('grab-icono-seguir');
+  var grabadora = null, pedazos = [], pista = null, reloj = null, segundos = 0, cancelado = false;
+
+  var CANDIDATOS = ['audio/ogg;codecs=opus','audio/ogg','audio/webm;codecs=opus','audio/webm','audio/mp4','audio/aac','audio/mpeg'];
+  function formatoServible(){
+    if (!window.MediaRecorder) return null;
+    for (var i=0;i<CANDIDATOS.length;i++){
+      if (MediaRecorder.isTypeSupported(CANDIDATOS[i])) return CANDIDATOS[i];
+    }
+    return null;
+  }
+  function aviso(msg, malo){
+    estado.innerHTML = '<span style="color:' + (malo ? '#d97a6a' : 'inherit') + '">' + msg + '</span>';
+  }
+  function pinta(){
+    var m = Math.floor(segundos/60), s = segundos % 60;
+    tiempo.textContent = m + ':' + (s<10?'0':'') + s;
+  }
+  function corre(si){
+    if (reloj) { clearInterval(reloj); reloj = null; }
+    if (si) reloj = setInterval(function(){ segundos++; pinta(); }, 1000);
+  }
+  function modoGrabando(si){
+    fila.style.display = si ? 'none' : 'flex';
+    barra.style.display = si ? 'flex' : 'none';
+  }
+  function reposo(){
+    corre(false);
+    if (pista) { pista.getTracks().forEach(function(t){ t.stop(); }); pista = null; }
+    grabadora = null; segundos = 0;
+    pinta();
+    modoGrabando(false);
+    iconoPausa.style.display = '';
+    iconoSeguir.style.display = 'none';
+    etiqueta.textContent = 'Pausar';
+  }
+
+  boton.addEventListener('click', async function(){
+    if (grabadora) return;
+    var tipo = formatoServible();
+    if (!tipo) { aviso('Este navegador no puede grabar audio. Abre el panel en el celular.', true); return; }
+    try {
+      pista = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      aviso('No se pudo usar el micrófono. Revisa el permiso del navegador.', true);
+      return;
+    }
+    cancelado = false;
+    pedazos = [];
+    grabadora = new MediaRecorder(pista, { mimeType: tipo });
+    grabadora.ondataavailable = function(e){ if (e.data && e.data.size) pedazos.push(e.data); };
+    grabadora.onstop = function(){
+      var tipoLimpio = tipo.split(';')[0];
+      var trozo = new Blob(pedazos, { type: tipoLimpio });
+      reposo();
+      if (cancelado) { aviso('Grabación descartada.'); return; }
+      if (!trozo.size) { aviso('No se grabó nada.', true); return; }
+      var dt = new DataTransfer();
+      var ext = tipoLimpio === 'audio/mpeg' ? 'mp3' : tipoLimpio.split('/')[1];
+      dt.items.add(new File([trozo], 'nota-de-voz.' + ext, { type: tipoLimpio }));
+      campo.files = dt.files;
+      aviso('Enviando la nota de voz…');
+      if (window.htmx) htmx.trigger(formulario, 'submit'); else formulario.requestSubmit();
+    };
+    grabadora.start();
+    segundos = 0; pinta();
+    modoGrabando(true);
+    corre(true);
+    aviso('Grabando…');
+  });
+
+  btnPausa.addEventListener('click', function(){
+    if (!grabadora) return;
+    if (grabadora.state === 'recording') {
+      grabadora.pause(); corre(false);
+      iconoPausa.style.display = 'none'; iconoSeguir.style.display = '';
+      etiqueta.textContent = 'Seguir'; aviso('Grabación en pausa.');
+    } else if (grabadora.state === 'paused') {
+      grabadora.resume(); corre(true);
+      iconoPausa.style.display = ''; iconoSeguir.style.display = 'none';
+      etiqueta.textContent = 'Pausar'; aviso('Grabando…');
+    }
+  });
+
+  btnTirar.addEventListener('click', function(){
+    if (grabadora) { cancelado = true; grabadora.stop(); }
+  });
+  btnEnviar.addEventListener('click', function(){
+    if (grabadora) grabadora.stop();
+  });
+  document.addEventListener('keydown', function(e){
+    if (e.key === 'Escape' && grabadora) { cancelado = true; grabadora.stop(); }
+  });
+})();
+</script>`;
 
 /** Fragment returned by /suggest — suggestion + a "use it" button that fills the textarea. */
 export function renderSuggestionBox(text: string): string {
