@@ -1173,7 +1173,17 @@ async function cmdUpdate(dirArg, flags) {
   const bot = (await catalog()).find((x) => x.slug === marker.slug);
   if (!bot) { console.log("  " + C.red(t().botGone) + "\n"); process.exit(1); }
   console.log(C.dim("  " + t().updInstalled(marker.version, bot.version)));
-  if (!verLt(marker.version, bot.version)) { console.log(C.green("\n  ✓ " + t().updUpToDate + "\n")); return; }
+  if (!verLt(marker.version, bot.version)) {
+    console.log(C.green("\n  ✓ " + t().updUpToDate + "\n"));
+    // Aunque ya esté en la última versión, si acaba de activar Forja+ hay que
+    // subir el tier del wrangler.toml (bug: antes se regresaba antes de esto).
+    if (bumpTierIfUpgraded(dir, v.plan)) {
+      console.log("  " + C.yellow(t().updTierUp) + "\n");
+      console.log("  " + t().updPublish);
+      console.log(C.dim("    ") + C.cyan(t().updPublishCmd) + C.dim("  (pnpm install && pnpm deploy)\n"));
+    }
+    return;
+  }
 
   process.stdout.write(C.dim(`\n  ${t().downloading("v" + bot.version)}`));
   const { buf, version } = await download(bot.slug, key);
