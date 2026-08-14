@@ -98,6 +98,12 @@ const DICT = {
     updInstalled: (a, b) => `Instalado: v${a}  ·  Última: v${b}`,
     updUpToDate: "Ya estás en la última versión.",
     updDone: (v) => `Actualizado a v${v}  (tu config y tu KB se conservaron)`,
+    updBackupSaved: (f) => `Respaldo previo guardado: ${f}`,
+    updDirtyTitle: "⚠ Esta carpeta tiene cambios propios que el update va a sobrescribir:",
+    updDirtyMore: (n) => `… y ${n} más`,
+    updDirtyRestore: (f) => `Si extrañas algo después, restáuralo desde el respaldo:  tar -xzf ${f}`,
+    updDirtyAsk: "¿Continuar con el update? (s/N) ",
+    updAborted: "Update cancelado — tu carpeta quedó intacta. Haz commit de tus cambios y reintenta.",
     updTierUp: "⚡ Tu licencia es Forja+ — subí tu bot a PRO. Al desplegar, superpoderes prendidos.",
     updPublish: "Para publicar los cambios, pídele a tu agente:",
     updPublishCmd: '"reinstala dependencias y despliega mi bot"',
@@ -205,6 +211,12 @@ const DICT = {
     updInstalled: (a, b) => `Installed: v${a}  ·  Latest: v${b}`,
     updUpToDate: "You're on the latest version.",
     updDone: (v) => `Updated to v${v}  (your config and KB were preserved)`,
+    updBackupSaved: (f) => `Pre-update backup saved: ${f}`,
+    updDirtyTitle: "⚠ This folder has local changes the update is about to overwrite:",
+    updDirtyMore: (n) => `… and ${n} more`,
+    updDirtyRestore: (f) => `If you miss anything afterwards, restore it from the backup:  tar -xzf ${f}`,
+    updDirtyAsk: "Continue with the update? (y/N) ",
+    updAborted: "Update canceled — your folder is untouched. Commit your changes and retry.",
     updTierUp: "⚡ Your license is Forja+ — bumped your bot to PRO. Deploy and the superpowers are on.",
     updPublish: "To publish the changes, ask your agent:",
     updPublishCmd: '"reinstall dependencies and deploy my bot"',
@@ -603,6 +615,47 @@ function extractOver(buf, dir, slug, version) {
     "--exclude=./.bot-state.json", "--exclude=./.bot-setup.json", `--exclude=./${MARKER}`]);
   rmSync(tgz, { force: true });
   writeMarker(dir, slug, version);
+}
+
+// ¿La carpeta del bot tiene cambios sin commit? extractOver preserva member/ y
+// wrangler.toml, pero pisa TODO lo demás (src/, test/, docs/…) sin preguntar.
+// Si el miembro —o su agente— parchó el código local, el update se lo lleva sin
+// remedio (pasó: 282 líneas de parches perdidas; se recuperaron solo porque
+// había un commit de media hora antes). Devuelve: null si no es repo git o no
+// hay git instalado (no podemos saber), [] si está limpio, o las líneas de
+// `git status --porcelain` si hay trabajo en riesgo.
+function gitDirty(dir) {
+  try {
+    if (!existsSync(join(dir, ".git"))) return null;
+    const out = execFileSync("git", ["-C", dir, "status", "--porcelain"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    }).toString().trim();
+    return out ? out.split("\n") : [];
+  } catch {
+    return null; // sin git en el PATH → mismo trato que "no es repo"
+  }
+}
+
+// Respaldo del estado ANTES de sobrescribir: un tarball de la carpeta completa
+// (menos lo pesado/regenerable) en .forja-backup/. Cuesta ~1 s y unos cientos
+// de KB, y convierte "perdí mi trabajo" en un tar -xzf. Usa el mismo tar del
+// que ya depende todo el flujo de install/update. Un archivo por versión de
+// origen: updates repetidos desde la misma versión lo reusan, no se acumulan.
+// Devuelve la ruta relativa del respaldo, o null si no se pudo (el update
+// sigue: el respaldo es protección extra, nunca la ruta crítica).
+function makePreUpdateBackup(dir, fromVersion) {
+  try {
+    const bdir = join(dir, ".forja-backup");
+    mkdirSync(bdir, { recursive: true });
+    const name = `pre-update-v${String(fromVersion).replace(/[^\w.-]+/g, "_")}.tgz`;
+    execFileSync("tar", ["-czf", join(bdir, name), "-C", dir,
+      "--exclude=./node_modules", "--exclude=./.git", "--exclude=./.wrangler",
+      "--exclude=./.forja-backup", // sin esto, cada respaldo se tragaría a los anteriores
+      "."]);
+    return `.forja-backup/${name}`;
+  } catch {
+    return null;
+  }
 }
 
 // Entrega los archivos DEFAULT nuevos de member/ que el miembro aún NO tenga
@@ -1188,6 +1241,37 @@ async function cmdUpdate(dirArg, flags) {
   process.stdout.write(C.dim(`\n  ${t().downloading("v" + bot.version)}`));
   const { buf, version } = await download(bot.slug, key);
   console.log(C.green("✓") + C.dim(` ${(buf.length / 1024).toFixed(0)} KB`));
+
+  // Protección del trabajo local. extractOver pisa src/ y compañía sin avisar;
+  // si hay cambios propios (parches del miembro o de su agente), aquí es donde
+  // se decidía perderlos. Ahora: repo git LIMPIO → nada que hacer, git ya lo
+  // tiene todo. Cualquier otro caso (repo sucio, o carpeta sin git donde no
+  // podemos saber) → respaldo primero. Y si además VEMOS trabajo en riesgo, se
+  // lista y —con humano en la terminal— se pregunta antes de seguir.
+  const dirty = gitDirty(dir);
+  let backupFile = null;
+  if (dirty === null || dirty.length > 0) {
+    backupFile = makePreUpdateBackup(dir, marker.version);
+    if (backupFile) console.log(C.dim("  " + t().updBackupSaved(backupFile)));
+  }
+  if (Array.isArray(dirty) && dirty.length > 0) {
+    console.log("  " + C.yellow(t().updDirtyTitle));
+    dirty.slice(0, 10).forEach((l) => console.log(C.dim("    " + l)));
+    if (dirty.length > 10) console.log(C.dim("    " + t().updDirtyMore(dirty.length - 10)));
+    if (backupFile) console.log(C.dim("  " + t().updDirtyRestore(backupFile)));
+    if (interactive()) {
+      const rl = createInterface({ input, output });
+      const ans = (await rl.question("  " + t().updDirtyAsk)).trim().toLowerCase();
+      rl.close();
+      if (!["s", "si", "sí", "y", "yes"].includes(ans)) {
+        console.log("  " + C.yellow(t().updAborted) + "\n");
+        process.exit(0);
+      }
+    }
+    // No-interactivo (agente/CI con --yes): sigue de largo — el respaldo ya
+    // está hecho y el aviso queda en el log del agente.
+  }
+
   extractOver(buf, dir, bot.slug, version);
   ensureMemberDefaults(buf, dir); // entrega defaults nuevos de member/ sin pisar los del miembro
   console.log(C.green(`\n  ✓ ${t().updDone(version)}\n`));
