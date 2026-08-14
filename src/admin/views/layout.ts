@@ -63,42 +63,43 @@ const NAV: Section[] = [
   },
 ];
 
-// <head> assets: fonts, Tailwind CDN + token config, lucide, htmx.
+// <head> assets: fonts, Tailwind (browser build) + token theme, lucide, htmx.
+// Tailwind se carga con el build oficial en-navegador de v4 (@tailwindcss/browser)
+// servido por jsDelivr, en lugar del antiguo Play CDN `cdn.tailwindcss.com`.
+// Motivo: el Play CDN es solo para desarrollo (no soportado en producción por
+// Tailwind) y es un único punto de fallo externo — si ese dominio se cae o queda
+// bloqueado, el panel se queda SIN ninguna utilidad de layout y colapsa a una
+// columna para todos los bots. jsDelivr es un CDN de producción con failover y la
+// versión queda fijada (@4). El antiguo `tailwind.config` de v3 se migra al bloque
+// `@theme` de v4 (mismos tokens de color/tipografía).
 const HEAD_ASSETS = `
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          colors: {
-            bg: "#141009",
-            panel: "#1d1710",
-            panel2: "#241c13",
-            raise: "#2b2116",
-            line: "#352a1d",
-            linelit: "#4c3a26",
-            accent: { DEFAULT: "#f07a3f", soft: "rgba(240,122,63,.14)" },
-            accent2: "#f5a623",
-            cream: "#efe7da",
-            muted: "#a1907b",
-            dim: "#726555",
-            ok: "#7fb77e",
-            info: "#7aa2d6",
-            bad: "#d97a6a",
-            violet: "#b99bd6",
-          },
-          fontFamily: {
-            display: ["'Space Grotesk'", "ui-sans-serif", "system-ui", "sans-serif"],
-            mono: ["'JetBrains Mono'", "ui-monospace", "monospace"],
-          },
-        },
-      },
-    };
-  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <style type="text/tailwindcss">
+    @theme {
+      --color-bg: #141009;
+      --color-panel: #1d1710;
+      --color-panel2: #241c13;
+      --color-raise: #2b2116;
+      --color-line: #352a1d;
+      --color-linelit: #4c3a26;
+      --color-accent: #f07a3f;
+      --color-accent-soft: rgba(240,122,63,.14);
+      --color-accent2: #f5a623;
+      --color-cream: #efe7da;
+      --color-muted: #a1907b;
+      --color-dim: #726555;
+      --color-ok: #7fb77e;
+      --color-info: #7aa2d6;
+      --color-bad: #d97a6a;
+      --color-violet: #b99bd6;
+      --font-display: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+      --font-mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+  </style>
   <script src="https://unpkg.com/lucide@latest"></script>`;
 
 // Global stylesheet: design tokens, base type/scroll, the reusable component
