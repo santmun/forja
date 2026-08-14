@@ -180,6 +180,12 @@ export function renderConfig(
 ): string {
   const cardGroups = CONTROL_LIST.map((c) => renderCardGroup(c, settings)).join("");
 
+  // Este campo escribe la MISMA llave que "Prompt del agente" de Mi Agente →
+  // Flujo, donde el textarea viene precargado con el prompt efectivo. Aquí llega
+  // vacío, así que hay que decir de frente que lo que se escriba sustituye al
+  // prompt completo — no se suma a él.
+  const hasPromptOverride = (settings[SETTING_KEYS.systemPromptOverride] ?? "").trim() !== "";
+
   const savedBanner = saved
     ? `<div style="border:1px solid var(--ok);background:rgba(127,183,126,.1);color:var(--ok);padding:10px 14px;font-size:12.5px;font-weight:600">Guardado ✓</div>`
     : "";
@@ -225,10 +231,12 @@ export function renderConfig(
 
         ${renderTextArea({
           name: SETTING_KEYS.systemPromptOverride,
-          label: "Instrucciones personalizadas",
-          help: "Personalidad o reglas especiales. Déjalo vacío para usar la configuración automática.",
+          label: "Prompt del agente (avanzado)",
+          help: hasPromptOverride
+            ? "✍ Modo manual: su bot está usando este texto como prompt completo, en lugar del automático. Para verlo entero o volver al automático: Mi Agente → Flujo → Agente."
+            : "⚠️ Lo que escriba aquí REEMPLAZA el prompt completo del bot — incluida la información del negocio de arriba, su base de conocimiento y sus reglas de seguridad. No agrega instrucciones: las sustituye. Déjelo vacío para usar el prompt automático. Para editar sobre el prompt real, vaya a Mi Agente → Flujo → Agente.",
           value: settings[SETTING_KEYS.systemPromptOverride] ?? "",
-          placeholder: "Ej. Siempre ofrece agendar una cita al final.",
+          placeholder: "Vacío = el bot arma su prompt solo con la información del negocio.",
           rows: 4,
         })}
 
