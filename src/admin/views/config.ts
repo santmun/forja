@@ -236,7 +236,8 @@ export function renderConfig(
             ? "✍ Modo manual: su bot está usando este texto como prompt completo, en lugar del automático. Para verlo entero o volver al automático: Mi Agente → Flujo → Agente."
             : "⚠️ Lo que escriba aquí REEMPLAZA el prompt completo del bot — incluida la información del negocio de arriba, su base de conocimiento y sus reglas de seguridad. No agrega instrucciones: las sustituye. Déjelo vacío para usar el prompt automático. Para editar sobre el prompt real, vaya a Mi Agente → Flujo → Agente.",
           value: settings[SETTING_KEYS.systemPromptOverride] ?? "",
-          placeholder: "Vacío = el bot arma su prompt solo con la información del negocio.",
+          placeholder:
+            "Vacío = el bot usa su prompt automático completo: la información del negocio, su base de conocimiento y sus reglas de seguridad.",
           rows: 4,
         })}
 
