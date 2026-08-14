@@ -8,6 +8,7 @@ import { parseMetaEvents, verifyMetaSignature } from "./channels/meta";
 import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
 import { adminApp } from "./admin/routes";
 import { purgeOldMessages } from "./crons/purgeOldMessages";
+import { DAILY_CRON, isNightlyTick } from "./crons/schedule";
 import { reindexKb } from "./kb/reindex";
 import { analyzeConversations } from "./insights/analyzer";
 import { Db } from "./db/client";
@@ -237,7 +238,13 @@ export default {
 
     // Los trabajos nocturnos SOLO corren en el tick diario (3am UTC) — un tick
     // más frecuente (si el miembro lo configura) no debe purgar/analizar de más.
-    if (event.cron && event.cron !== "0 3 * * *") return;
+    // Ojo: si NINGÚN cron configurado es DAILY_CRON, estos trabajos no corren
+    // nunca. Por eso se loguea el motivo, y por eso el test compara la constante
+    // contra wrangler.toml.
+    if (!isNightlyTick(event.cron)) {
+      console.log(`cron ${event.cron}: se omiten los trabajos nocturnos (solo corren en "${DAILY_CRON}")`);
+      return;
+    }
 
     // Daily cron (wrangler.toml: "0 3 * * *") — purge messages older than 90 days.
     await purgeOldMessages(env);

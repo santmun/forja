@@ -58,6 +58,9 @@ DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 #   CONTROL_PLANE_URL          optional (var) — base URL of the control plane (future reports / license check)
 
 [triggers]
+# AGREGA ticks aquí si los necesitas, pero NO quites "0 3 * * *": los trabajos
+# nocturnos (purga, insights, flywheel, reporte al dueño) solo corren en ese tick
+# — ver DAILY_CRON en src/crons/schedule.ts. Sin él dejan de correr en silencio.
 crons = ["0 3 * * *"]  # daily 3am UTC: purge old messages
 
 # DASHBOARD_PASSWORD  (secret) — HTTP Basic Auth password for the admin dashboard; username is always "admin".
