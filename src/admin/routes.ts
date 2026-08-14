@@ -335,6 +335,10 @@ adminApp.post("/agente/node/:id/save", async (c) => {
       await repo.set(SETTING_KEYS.systemPromptOverride, "");
     } else if (form.get("bot_paused") !== null) {
       await repo.set(SETTING_KEYS.botPaused, String(form.get("bot_paused")) === "1" ? "1" : "0");
+    } else if (form.get("custom_instructions") !== null) {
+      // El campo ADITIVO: se suma al prompt generado sin congelarlo. Guardar
+      // vacío = quitar las instrucciones (por eso no se filtra el "").
+      await repo.set(SETTING_KEYS.customInstructions, String(form.get("custom_instructions")).trim());
     } else if (form.get("system_prompt_override") !== null) {
       await repo.set(SETTING_KEYS.systemPromptOverride, String(form.get("system_prompt_override")).trim());
     }

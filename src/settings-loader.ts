@@ -91,6 +91,10 @@ export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise
   const niche = getNiche(env);
 
   const systemPromptOverride = get(SETTING_KEYS.systemPromptOverride);
+  // Reglas del dueño que se SUMAN al prompt GENERADO (mismo trato que las
+  // lecciones): con un override manual activo no aplican — el override es
+  // "úsalo tal cual", y el panel lo advierte junto al campo.
+  const customInstructions = get(SETTING_KEYS.customInstructions);
   const businessContext = get(SETTING_KEYS.businessContext) ?? renderBusinessContext();
   const botName = get(SETTING_KEYS.botName) ?? env.BOT_NAME;
   // Tono elegido en el panel gana; si no hay, el tono por defecto del nicho.
@@ -117,6 +121,7 @@ export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise
       extraEscalationKeywords: escalationKeywords,
       botName,
       lessons,
+      customInstructions,
     });
 
   const bufferSecondsRaw = get(SETTING_KEYS.bufferSeconds);

@@ -146,6 +146,35 @@ describe("resolveAgentConfig — temperature", () => {
   });
 });
 
+describe("resolveAgentConfig — custom_instructions", () => {
+  it("suma las instrucciones al prompt generado sin congelarlo", async () => {
+    await repo.set(SETTING_KEYS.customInstructions, "Siempre ofrece agendar una cita al final.");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toContain("<instrucciones_del_negocio>");
+    expect(cfg.systemPrompt).toContain("Siempre ofrece agendar una cita al final.");
+    // El resto del cerebro sigue ahí — sumar, no reemplazar:
+    expect(cfg.systemPrompt).toContain("<role>");
+    expect(cfg.systemPrompt).toContain("<business_context>");
+    expect(cfg.systemPrompt).toContain("<anti_patterns>");
+  });
+
+  it("omite el bloque cuando no hay instrucciones (o son espacios)", async () => {
+    let cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<instrucciones_del_negocio>");
+
+    await repo.set(SETTING_KEYS.customInstructions, "   ");
+    cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).not.toContain("<instrucciones_del_negocio>");
+  });
+
+  it("con un prompt manual activo NO aplican (el override es 'tal cual')", async () => {
+    await repo.set(SETTING_KEYS.customInstructions, "Siempre ofrece agendar una cita.");
+    await repo.set(SETTING_KEYS.systemPromptOverride, "MI PROMPT CUSTOM");
+    const cfg = await resolveAgentConfig(env, TOOLS);
+    expect(cfg.systemPrompt).toBe("MI PROMPT CUSTOM");
+  });
+});
+
 describe("resolveAgentConfig — learned lessons (flywheel)", () => {
   it("injects lessons into the generated prompt", async () => {
     await repo.set(SETTING_KEYS.learnedLessons, JSON.stringify(["Confirma el pago antes de prometer acceso."]));
