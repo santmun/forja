@@ -39,6 +39,7 @@ export interface Env {
   RESEND_API_KEY?: string;
   TELEGRAM_BOT_TOKEN?: string;
   MANYCHAT_API_KEY?: string;
+  MANYCHAT_WEBHOOK_SECRET?: string;  // shared secret expected in the X-Api-Key header on /webhooks/manychat; unset = guard off
   MANYCHAT_CONTENT_TYPE?: "instagram" | "whatsapp" | "telegram" | "messenger"; // ManyChat channel for sendContent; defaults to "instagram"
   TWILIO_ACCOUNT_SID?: string;
   TWILIO_AUTH_TOKEN?: string;

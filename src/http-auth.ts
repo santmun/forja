@@ -24,3 +24,29 @@ export function requireControlPlane(req: Request, env: Env): boolean {
   if (!match) return false;
   return tokensMatch(match[1].trim(), expected);
 }
+
+/** Header ManyChat sends the shared secret in (see the ManyChat setup guide). */
+export const MANYCHAT_SECRET_HEADER = "X-Api-Key";
+
+/**
+ * Fail-OPEN auth for the `/webhooks/manychat` ingress.
+ *
+ * Passes when MANYCHAT_WEBHOOK_SECRET is unset (nothing changes for bots that
+ * are already running) or when the request carries a matching `X-Api-Key`
+ * header (constant-time compare via tokensMatch).
+ *
+ * Fail-open is deliberate here, unlike requireControlPlane. The setup guide has
+ * been telling members to add this header for a while, but the route never read
+ * it — so a fail-closed default would 401 every bot whose owner skipped that
+ * step, and inbound messages would silently stop. Opening up lets the fix ship
+ * in a safe order:
+ *   1. deploy (no behaviour change)
+ *   2. add the header in the ManyChat External Request
+ *   3. `wrangler secret put MANYCHAT_WEBHOOK_SECRET` → enforced from here on
+ */
+export function manychatWebhookAllowed(req: Request, env: Env): boolean {
+  const expected = env.MANYCHAT_WEBHOOK_SECRET?.trim();
+  if (!expected) return true; // guard off → previous behaviour
+  const received = req.headers.get(MANYCHAT_SECRET_HEADER)?.trim() ?? "";
+  return tokensMatch(received, expected);
+}
