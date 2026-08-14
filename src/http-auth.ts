@@ -31,22 +31,34 @@ export const MANYCHAT_SECRET_HEADER = "X-Api-Key";
 /**
  * Fail-OPEN auth for the `/webhooks/manychat` ingress.
  *
- * Passes when MANYCHAT_WEBHOOK_SECRET is unset (nothing changes for bots that
- * are already running) or when the request carries a matching `X-Api-Key`
- * header (constant-time compare via tokensMatch).
+ * Passes when MANYCHAT_WEBHOOK_SECRET was never configured (nothing changes for
+ * bots that are already running) or when the request carries a matching
+ * `X-Api-Key` header (constant-time compare via tokensMatch).
  *
- * Fail-open is deliberate here, unlike requireControlPlane. The setup guide has
- * been telling members to add this header for a while, but the route never read
- * it — so a fail-closed default would 401 every bot whose owner skipped that
- * step, and inbound messages would silently stop. Opening up lets the fix ship
- * in a safe order:
+ * Fail-open on an ABSENT secret is deliberate here, unlike requireControlPlane.
+ * The setup guide has been telling members to add this header for a while, but
+ * the route never read it — so a fail-closed default would 401 every bot whose
+ * owner skipped that step, and inbound messages would silently stop. Opening up
+ * lets the fix ship in a safe order:
  *   1. deploy (no behaviour change)
  *   2. add the header in the ManyChat External Request
  *   3. `wrangler secret put MANYCHAT_WEBHOOK_SECRET` → enforced from here on
+ *
+ * A secret that IS configured but blank is a different case: the owner believes
+ * the webhook is protected. Treating that as "guard off" would leave them open
+ * while thinking otherwise — the exact failure this function exists to remove —
+ * so it fails closed and says why.
  */
 export function manychatWebhookAllowed(req: Request, env: Env): boolean {
-  const expected = env.MANYCHAT_WEBHOOK_SECRET?.trim();
-  if (!expected) return true; // guard off → previous behaviour
+  const configured = env.MANYCHAT_WEBHOOK_SECRET;
+  if (configured === undefined) return true; // never set → previous behaviour
+  const expected = configured.trim();
+  if (!expected) {
+    console.error(
+      "MANYCHAT_WEBHOOK_SECRET is set but blank — rejecting every ManyChat webhook. Set a real value, or unset it to turn the guard off.",
+    );
+    return false;
+  }
   const received = req.headers.get(MANYCHAT_SECRET_HEADER)?.trim() ?? "";
   return tokensMatch(received, expected);
 }
