@@ -41,6 +41,11 @@ export interface AgentIncomingPayload {
   isOwnerMessage?: boolean;
 }
 
+// Lo que recibe el cliente cuando el LLM no logró producir texto — ni con
+// reintentos ni con el proveedor alterno. Vive aquí, y no en línea, porque hay
+// dos caminos que terminan aquí: el failover agotado y el guard de texto vacío.
+const FALLBACK_REPLY = "Algo falló de mi lado, intenta de nuevo en un momento.";
+
 export class SupportAgent extends Agent<Env, SupportAgentState> {
   initialState: SupportAgentState = {
     conversationId: null,
@@ -339,6 +344,18 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       for await (const chunk of result.textStream) {
         text += chunk;
       }
+      // Un error del proveedor A MITAD del stream (p. ej. `server_error` de
+      // OpenAI) NO llega como excepción: `textStream` simplemente termina y
+      // `text` queda vacío. Sin este guard el turno se daba por bueno, el
+      // FAILOVER de abajo nunca entraba, y el cliente recibía un mensaje EN
+      // BLANCO — peor que un error, porque parece que el bot lo ignoró.
+      // Tratarlo como fallo activa el failover que ya existe: reintento con
+      // backoff, proveedor alterno y, si nada sirve, FALLBACK_REPLY.
+      if (!text.trim()) {
+        throw new Error(
+          "[SupportAgent] el modelo terminó el stream sin texto (posible error del proveedor)",
+        );
+      }
       assistantText = text;
       const usage = await result.usage;
       inputTokens = usage?.inputTokens ?? 0;
@@ -401,8 +418,21 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       }
 
       if (!ok) {
-        assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
+        assistantText = FALLBACK_REPLY;
       }
+    }
+
+    // Red de seguridad final: pase lo que pase arriba (un camino nuevo, un
+    // guard que cambie), NUNCA se persiste ni se envía un mensaje vacío. Va
+    // ANTES del append para que el historial y lo que recibe el cliente
+    // coincidan: si se pone después, el cliente ve el fallback pero en la
+    // conversación queda el mensaje en blanco y el panel sigue mostrando el
+    // síntoma original — que fue justo lo que hizo difícil diagnosticarlo.
+    if (!assistantText.trim()) {
+      console.error(
+        "[SupportAgent.processBuffer] texto vacío antes de enviar — se usa el fallback",
+      );
+      assistantText = FALLBACK_REPLY;
     }
 
     // Persist assistant message (with usage + model_used + tool calls)
