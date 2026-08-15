@@ -42,6 +42,8 @@ import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
 import { renderLeads, exportLeadsCsv } from "./views/leads";
 import { renderTickets } from "./views/tickets";
+import { renderReportes, reporteEnviado, reporteVacio } from "./views/reportes";
+import { ReportesRepo } from "../db/reportes";
 import { renderConfig } from "./views/config";
 import { renderConexiones } from "./views/conexiones";
 import { renderCampanas } from "./views/campanas";
@@ -359,6 +361,89 @@ adminApp.post("/agente/tools/:name/toggle", async (c) => {
 adminApp.get("/leads", async (c) => c.html(await renderLeads(c.env)));
 
 adminApp.get("/tickets", async (c) => c.html(await renderTickets(c.env)));
+
+// --- Buzón de reportes del equipo -------------------------------------------
+//
+// Quien atiende ve una respuesta mala del bot y la reporta ahí mismo. Se entra
+// por dos sitios —esta pestaña y el botón ⚑ del hilo— y ambos escriben aquí.
+
+adminApp.get("/reportes", async (c) =>
+  c.html(
+    await renderReportes(c.env, {
+      filtro: c.req.query("estado"),
+      enviado: c.req.query("enviado") === "1",
+    }),
+  ),
+);
+
+/**
+ * Crear un reporte. Responde de dos formas según de dónde venga:
+ *   · desde el hilo (htmx) → un fragmento de confirmación, sin recargar nada;
+ *   · desde la pestaña → redirect, y el reporte ya aparece en la lista.
+ */
+adminApp.post("/reportes", async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  const texto = String(form?.get("texto") ?? "").trim();
+  const esHtmx = c.req.header("HX-Request") === "true";
+
+  if (!texto) {
+    return esHtmx ? c.html(reporteVacio()) : c.redirect("/admin/reportes");
+  }
+
+  const tipo = String(form?.get("tipo") ?? "error") === "sugerencia" ? "sugerencia" : "error";
+  const conversationId = String(form?.get("conversation_id") ?? "").trim() || null;
+  const reportadoPor = String(form?.get("reportado_por") ?? "").trim() || null;
+
+  await new ReportesRepo(new Db(c.env.DB)).crear({
+    tipo,
+    texto,
+    reportadoPor,
+    conversationId,
+  });
+
+  // Aviso al dueño por el mismo camino que los handoffs (Telegram/correo). Va
+  // en segundo plano a propósito: si Telegram tarda o falla, quien reportó no
+  // se queda esperando ni pierde el reporte, que YA está guardado.
+  const avisar = async () => {
+    const { notifyOwner } = await import("../tools/handoffHuman");
+    const origen = c.env.DASHBOARD_BASE_URL ?? "";
+    await notifyOwner(c.env, {
+      reason:
+        tipo === "sugerencia" ? "💡 Idea para el bot" : "⚠ Reporte: algo falló en el bot",
+      summary:
+        `${reportadoPor ? `${reportadoPor}: ` : ""}${texto}` +
+        (conversationId
+          ? `
+
+Chat: ${origen}/admin/conversations?c=${encodeURIComponent(conversationId)}`
+          : ""),
+      ticketId: "",
+    });
+  };
+  try {
+    c.executionCtx.waitUntil(
+      avisar().catch((e) => console.error("[reportes] no se pudo avisar al dueño:", e)),
+    );
+  } catch {
+    // sin executionCtx (pruebas): el reporte igual quedó guardado
+  }
+
+  return esHtmx
+    ? c.html(reporteEnviado(), 200, { "X-Reporte": "1" })
+    : c.redirect("/admin/reportes?enviado=1");
+});
+
+adminApp.post("/reportes/:id/resolver", async (c) => {
+  const form = await c.req.formData().catch(() => null);
+  const respuesta = String(form?.get("respuesta") ?? "").trim();
+  await new ReportesRepo(new Db(c.env.DB)).resolver(c.req.param("id"), respuesta);
+  return c.redirect("/admin/reportes");
+});
+
+adminApp.post("/reportes/:id/reabrir", async (c) => {
+  await new ReportesRepo(new Db(c.env.DB)).reabrir(c.req.param("id"));
+  return c.redirect("/admin/reportes");
+});
 
 // Conexiones: mapa de canales con estado verde/gris (paso 4 del onboarding).
 adminApp.get("/conexiones", (c) => c.html(renderConexiones(c.env)));
