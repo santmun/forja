@@ -18,6 +18,7 @@ import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { temaDelCanal, estiloDelTema, colorDeMarca } from "./temaCanal";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -103,9 +104,15 @@ function initialsOf(label: string): string {
 }
 
 /** WhatsApp gets info-blue, every other channel gets accent-2 amber — mirrors the mockup's WA/other split. */
+/**
+ * Cada etiqueta con el color de SU red: el verde de WhatsApp, el azul de
+ * Telegram. De un vistazo se ve por dónde escribió cada persona, sin leer.
+ * Los tonos salen de temaCanal.ts, los mismos que visten el hilo al abrirlo.
+ */
 function channelColor(channel: string): string {
-  return channel === "twilio" || channel === "whatsapp" ? "var(--info)" : "var(--accent-2)";
+  return colorDeMarca(channel);
 }
+
 
 interface InboxParams {
   search?: string;
@@ -214,6 +221,11 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ?", [convId]);
   if (!conv) return `<div style="padding:24px;font-size:12.5px;color:var(--dim)">Conversación no encontrada.</div>`;
 
+  // Cada chat se viste como la app de la que viene. Ver temaCanal.ts: el alcance
+  // es DELIBERADO — solo el hilo. La lista, los filtros y las tarjetas conservan
+  // la identidad del panel, porque son la herramienta de trabajo, no el chat.
+  const tema = temaDelCanal(conv.channel);
+
   const insight = await new InsightsRepo(db).getByConversation(convId);
   const msgs = await db.all<any>(
     "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 100",
@@ -258,7 +270,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     </button>`;
 
   const header = `
-  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)">
+  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid rgba(0,0,0,.10);background:var(--ch-barra)">
     <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name ?? conv.channel_user_id)}</span>
     <span style="${smallPill("var(--info)")}">${escapeHtml(channelLabel(conv.channel))}</span>
     ${statusPill}
@@ -292,8 +304,8 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       if (m.role === "user") {
         return `
         <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
-          <div style="background:var(--panel2);border:1px solid var(--line);padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
-          <span style="font-size:9.5px;color:var(--dim)">${time}</span>
+          <div style="background:var(--ch-ajena);border-radius:var(--ch-radio);padding:9px 13px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ch-texto)">${escapeHtml(m.content)}</div>
+          <span style="font-size:9.5px;color:var(--ch-suave)">${time}</span>
         </div>`;
       }
 
@@ -302,31 +314,35 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       const meta = isOwner
         ? `Tú · ${time}`
         : [m.model_used ? modelShort(m.model_used) : null, cost || null, time].filter(Boolean).join(" · ");
+      // Lo que sale de nuestro lado (bot o equipo) va en la burbuja "propia" de
+      // la app; el matiz del equipo se marca con un borde, no con otro color.
       const bubbleBg = isOwner
-        ? "background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.4)"
-        : "background:var(--accent-soft);border:1px solid var(--linelit)";
+        ? "background:var(--ch-propia);border:1px solid var(--ch-marca)"
+        : "background:var(--ch-propia)";
       return `
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:78%;margin-left:auto">
         ${chips}
-        <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
-        <span style="font-size:9.5px;color:var(--dim)">${meta}</span>
+        <div style="${bubbleBg};border-radius:var(--ch-radio);padding:9px 13px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--ch-texto)">${escapeHtml(m.content)}</div>
+        <span style="font-size:9.5px;color:var(--ch-suave)">${meta}</span>
       </div>`;
     })
     .join("");
 
   return `
+  <div style="${estiloDelTema(tema)};display:flex;flex-direction:column;flex:1;min-height:0">
   ${header}
-  <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--bg)">
-    ${bubbles || `<div style="text-align:center;font-size:12.5px;color:var(--dim);padding:32px 0">Sin mensajes.</div>`}
+  <div style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--ch-fondo)">
+    ${bubbles || `<div style="text-align:center;font-size:12.5px;color:var(--ch-suave);padding:32px 0">Sin mensajes.</div>`}
+  </div>
   </div>`;
 }
 
 // --- Composer (static per selection — NOT inside the polled fragment) ---------
 
-function renderComposer(convId: string): string {
+function renderComposer(convId: string, tema = temaDelCanal(null)): string {
   const id = encodeURIComponent(convId);
   return `
-  <div style="border-top:1px solid var(--line);background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:8px">
+  <div style="${estiloDelTema(tema)};border-top:1px solid rgba(0,0,0,.10);background:var(--ch-barra);padding:12px;display:flex;flex-direction:column;gap:8px">
     <div id="suggestion-box"></div>
     <form hx-post="/admin/conversations/${id}/reply" hx-target="#send-status" hx-swap="innerHTML"
           hx-on::after-request="if(event.detail.xhr.getResponseHeader('X-Sent')==='1')this.reset()"
@@ -397,6 +413,12 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
     ...(p.selectedId ? { c: p.selectedId } : {}),
   }).toString()}`;
 
+  // El canal de la conversación abierta: el cajón de respuesta se viste igual
+  // que el hilo, si no el corte entre uno y otro se nota.
+  const canalSeleccionado = p.selectedId
+    ? ((await db.first<{ channel: string }>("SELECT channel FROM conversations WHERE id = ?", [p.selectedId]))?.channel ?? null)
+    : null;
+
   let rightPane: string;
   if (p.selectedId) {
     const thread = await renderThreadLive(env, p.selectedId);
@@ -406,7 +428,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
            hx-trigger="every 5s" hx-swap="innerHTML">
         ${thread}
       </div>
-      ${renderComposer(p.selectedId)}`;
+      ${renderComposer(p.selectedId, temaDelCanal(canalSeleccionado))}`;
   } else {
     rightPane = `
       <div class="flex-1 flex items-center justify-center" style="font-size:12.5px;color:var(--dim);background:var(--bg)">
