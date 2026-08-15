@@ -80,8 +80,22 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       return { acknowledged: true };
     }
 
-    // If paused, ignore (bot stays silent)
+    // Media is processed BEFORE the pause checks on purpose: a paused
+    // conversation still has to leave the customer's message in the panel, and
+    // it has to be readable there — the transcript of a voice note, not
+    // "(audio)".
+    const { processedText, hasImage } = await this.processMedia(payload);
+
+    // Conversation paused (a human took over): the bot stays silent, but the
+    // customer's message MUST still be recorded. Otherwise it never shows up in
+    // the dashboard and the team has no way to see what it is supposed to
+    // answer by hand — which is the whole point of pausing.
+    //
+    // Seen in production on 2026-07-29: a teammate replied from his own phone
+    // while the conversation was paused and his message never reached the
+    // dashboard.
     if (await convs.isPaused(conv.id)) {
+      await this.recordWithoutReplying(db, conv.id, processedText);
       return { acknowledged: true };
     }
 
@@ -116,7 +130,61 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       }
     }
 
-    // Process media (audio → transcription, image → Pro-gated multimodal marker)
+    // Append to buffer (we always persist the client's message)
+    const pending = [
+      ...this.state.pendingMessages,
+      { text: processedText, receivedAt: Date.now() },
+    ];
+    this.setState({
+      ...this.state,
+      pendingMessages: pending,
+      imageRetryCount: hasImage ? 0 : this.state.imageRetryCount,
+    });
+
+    // Resolve effective config (D1 settings overlaid on env defaults).
+    // We need at least bot_paused (to decide whether to reply) and the buffer.
+    const cfg = await resolveAgentConfig(this.env, []);
+
+    // Owner paused the bot via the dashboard → keep the message buffered but
+    // stay silent: do NOT arm the alarm, so alarm() never runs.
+    //
+    // Same hole as the per-conversation pause: the message only lived in
+    // pendingMessages (Durable Object state), which the dashboard cannot see,
+    // so the owner had no way to read what came in while the bot was off. It
+    // stays buffered (unchanged) and is now recorded too.
+    if (cfg.botPaused) {
+      await this.recordWithoutReplying(db, conv.id, processedText);
+      return { acknowledged: true };
+    }
+
+    // Schedule buffer processing via the agents SDK scheduler.
+    // The SDK overrides alarm() to dispatch named callbacks from its
+    // cf_agents_schedules table, so raw ctx.storage.setAlarm() alone won't
+    // invoke our code. We upsert a fixed 'msg-buffer' row (so rapid messages
+    // debounce to a single fire) and set the raw alarm as the trigger.
+    const alarmAt = Date.now() + cfg.bufferMs;
+    const alarmAtSec = Math.floor(alarmAt / 1000);
+    this.sql`
+      INSERT OR REPLACE INTO cf_agents_schedules
+        (id, callback, payload, type, time, created_at)
+      VALUES
+        ('msg-buffer', 'processBuffer', '{}', 'delayed', ${alarmAtSec}, unixepoch())
+    `;
+    await this.ctx.storage.setAlarm(alarmAt);
+    this.setState({ ...this.state, lastAlarmAt: alarmAt });
+
+    return { acknowledged: true };
+  }
+
+  /**
+   * Audio → transcription, image → Pro-gated multimodal marker.
+   *
+   * Extracted from ingest() so the paused paths can record a READABLE message:
+   * the transcript of the voice note, not a placeholder.
+   */
+  private async processMedia(
+    payload: AgentIncomingPayload,
+  ): Promise<{ processedText: string; hasImage: boolean }> {
     let processedText = payload.text ?? "";
     let hasImage = false;
 
@@ -145,44 +213,27 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       }
     }
 
-    // Append to buffer (we always persist the client's message)
-    const pending = [
-      ...this.state.pendingMessages,
-      { text: processedText, receivedAt: Date.now() },
-    ];
-    this.setState({
-      ...this.state,
-      pendingMessages: pending,
-      imageRetryCount: hasImage ? 0 : this.state.imageRetryCount,
-    });
+    return { processedText, hasImage };
+  }
 
-    // Resolve effective config (D1 settings overlaid on env defaults).
-    // We need at least bot_paused (to decide whether to reply) and the buffer.
-    const cfg = await resolveAgentConfig(this.env, []);
-
-    // Owner paused the bot via the dashboard → keep the message buffered but
-    // stay silent: do NOT arm the alarm, so alarm() never runs.
-    if (cfg.botPaused) {
-      return { acknowledged: true };
+  /**
+   * The bot is not going to answer this one, but the customer's message still
+   * has to end up in the dashboard so a human can pick it up.
+   *
+   * Best-effort on purpose: if D1 hiccups, the webhook must not fail — losing
+   * the record is bad, returning an error to the channel is worse.
+   */
+  private async recordWithoutReplying(
+    db: Db,
+    conversationId: string,
+    text: string,
+  ): Promise<void> {
+    if (!text.trim()) return;
+    try {
+      await new MessagesRepo(db).append(conversationId, "user", text);
+    } catch (e) {
+      console.error("[ingest] could not record the message while paused:", e);
     }
-
-    // Schedule buffer processing via the agents SDK scheduler.
-    // The SDK overrides alarm() to dispatch named callbacks from its
-    // cf_agents_schedules table, so raw ctx.storage.setAlarm() alone won't
-    // invoke our code. We upsert a fixed 'msg-buffer' row (so rapid messages
-    // debounce to a single fire) and set the raw alarm as the trigger.
-    const alarmAt = Date.now() + cfg.bufferMs;
-    const alarmAtSec = Math.floor(alarmAt / 1000);
-    this.sql`
-      INSERT OR REPLACE INTO cf_agents_schedules
-        (id, callback, payload, type, time, created_at)
-      VALUES
-        ('msg-buffer', 'processBuffer', '{}', 'delayed', ${alarmAtSec}, unixepoch())
-    `;
-    await this.ctx.storage.setAlarm(alarmAt);
-    this.setState({ ...this.state, lastAlarmAt: alarmAt });
-
-    return { acknowledged: true };
   }
 
   /**
