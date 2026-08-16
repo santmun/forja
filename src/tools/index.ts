@@ -14,20 +14,21 @@ export interface ToolContext {
 }
 
 export function buildTools(ctx: ToolContext) {
-  // Free tier base set. captureLead va aquí a propósito: el bot Starter (free)
-  // captura prospectos — es el valor central de un bot de ventas. Lo Pro son las
-  // tools más avanzadas por nicho (agendar citas, consultar catálogo/inventario).
+  // Free tier base set. captureLead y scheduleAppointment van aquí a propósito: el bot
+  // Starter (free) captura prospectos Y agenda citas — Cal.com lo pone el dueño con su
+  // propia cuenta/llave, sin costo para Forja, así que es valor central sin gate. Lo Pro
+  // es consultar catálogo/inventario y las tools avanzadas por nicho.
   const tools: Record<string, any> = {
     searchKb: searchKbTool(ctx.env),
     handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId),
     pauseBot: pauseBotTool(ctx.env, ctx.getConversationId),
     snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId),
     captureLead: captureLeadTool(ctx.env, ctx.getConversationId),
+    scheduleAppointment: scheduleAppointmentTool(ctx.env, ctx.getConversationId),
   };
 
   // Pro tier additions
   if (isPro(ctx.env)) {
-    tools.scheduleAppointment = scheduleAppointmentTool(ctx.env, ctx.getConversationId);
     tools.catalogQuery = catalogQueryTool(ctx.env);
   }
 
