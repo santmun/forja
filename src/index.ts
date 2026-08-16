@@ -211,12 +211,33 @@ app.route("/admin", adminApp);
 app.route("/api", apiApp);
 
 // KB reindex — embeds scripts/kb-fixtures.json into Vectorize. Guarded by the
-// KB_REINDEX_TOKEN secret via the X-Reindex-Token header. Trigger after deploy:
-//   curl -X POST https://<worker>/kb/reindex -H "X-Reindex-Token: <token>"
+// KB_REINDEX_TOKEN secret via the X-Reindex-Token header.
+//
+// El orden importa, y no es el intuitivo:
+//   1. pnpm kb:reindex        (regenera el manifiesto)
+//   2. pnpm deploy
+//   3. wrangler secret put KB_REINDEX_TOKEN     <- DESPUÉS del deploy
+//   4. curl -X POST https://<worker>/kb/reindex -H "X-Reindex-Token: <token>"
+//
+// El secret va después del deploy porque un deploy posterior lo puede dejar sin
+// efecto. Y aun haciéndolo en este orden, el paso 4 puede devolver
+// `unauthorized` en el primer intento: el secret tarda unos segundos en
+// propagarse por el edge. Esperar y reintentar resuelve — el token no está mal.
 app.post("/kb/reindex", async (c) => {
   const provided = c.req.header("X-Reindex-Token") ?? "";
   const expected = c.env.KB_REINDEX_TOKEN ?? "";
-  if (!expected || !tokensMatch(provided, expected)) {
+  if (!expected) {
+    // Distinto de "token equivocado", pero la respuesta es la misma a propósito:
+    // decirle a quien llama que el Worker no tiene secret es regalarle
+    // información. El aviso va al log, donde lo ve el dueño con `wrangler tail`
+    // y nadie más. Sin esto, un secret que no propagó y un token mal copiado se
+    // ven idénticos desde afuera.
+    console.warn(
+      "kb/reindex: KB_REINDEX_TOKEN no está configurado en este Worker (o todavía no propagó); toda llamada va a devolver unauthorized",
+    );
+    return c.json({ ok: false, error: "unauthorized" }, 401);
+  }
+  if (!tokensMatch(provided, expected)) {
     return c.json({ ok: false, error: "unauthorized" }, 401);
   }
   const r = await reindexKb(c.env);

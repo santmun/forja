@@ -145,7 +145,12 @@ function main(): void {
   }
   console.log(
     "ℹ️  Manifest regenerated. Trigger the real Vectorize reindex AFTER deploy:\n" +
-      '    curl -X POST https://<worker>/kb/reindex -H "X-Reindex-Token: $KB_REINDEX_TOKEN"',
+      "    1. pnpm deploy\n" +
+      "    2. wrangler secret put KB_REINDEX_TOKEN     (después del deploy)\n" +
+      '    3. curl -X POST https://<worker>/kb/reindex -H "X-Reindex-Token: $KB_REINDEX_TOKEN"\n' +
+      "\n" +
+      "    Si el paso 3 devuelve {\"ok\":false,\"error\":\"unauthorized\"}, esperá unos\n" +
+      "    segundos y reintentá: el secret tarda en propagarse. No es tu token.",
   );
 }
 
