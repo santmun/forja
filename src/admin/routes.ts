@@ -612,12 +612,23 @@ adminApp.post("/conversations/:id/resume", async (c) => {
   // has context when it picks the conversation back up. The summary field is
   // optional, so tolerate a request with no form body (formData() throws on an
   // empty/no-content-type body).
+  //
+  // Devolver el bot NO depende de mandar el formulario: la barra lo hace en el
+  // PRIMER clic. El cuadro que se abre después es opcional —sirve para contarle
+  // al bot algo que pasó fuera del chat— y se puede cerrar sin enviar nada.
+  //
+  // Por eso, cuando la petición viene de HTMX y sin nota se responde vacío:
+  // redibujar el hilo cerraría ese cuadro a media frase.
+  //
+  // Y la nota se guarda SOLO si de verdad se escribió algo: antes se metía una
+  // de oficio y en el chat aparecía un mensaje que nadie había escrito.
   const form = await c.req.formData().catch(() => null);
-  const summary =
-    String(form?.get("summary") ?? "").trim() ||
-    "(El dueño habló con el cliente y resolvió la consulta.)";
-  const msgs = new MessagesRepo(new Db(c.env.DB));
-  await msgs.append(id, "owner", summary);
+  const summary = String(form?.get("summary") ?? "").trim();
+  if (summary) {
+    const msgs = new MessagesRepo(new Db(c.env.DB));
+    await msgs.append(id, "owner", summary);
+  }
+  if (c.req.header("HX-Request") && !summary) return c.body(null, 204);
   return c.redirect(`/admin/conversations?c=${encodeURIComponent(id)}`);
 });
 
