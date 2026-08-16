@@ -52,6 +52,23 @@ describe("renderSystemPrompt", () => {
     expect(prompt).toContain("Horarios: Lun-Sáb 10am-8pm");
   });
 
+  it("renders customInstructions as an additive block and omits it when absent", () => {
+    const withInstructions = renderSystemPrompt({
+      ...input,
+      customInstructions: "Siempre ofrece agendar una cita al final.",
+    });
+    expect(withInstructions).toContain("<instrucciones_del_negocio>");
+    expect(withInstructions).toContain("Siempre ofrece agendar una cita al final.");
+
+    const without = renderSystemPrompt(input);
+    expect(without).not.toContain("<instrucciones_del_negocio>");
+    expect(without).not.toContain("{{INSTRUCCIONES}}");
+
+    // Espacios en blanco cuentan como "sin instrucciones":
+    const blank = renderSystemPrompt({ ...input, customInstructions: "   " });
+    expect(blank).not.toContain("<instrucciones_del_negocio>");
+  });
+
   it("inserts nichoPlaybook when provided and empty string when omitted", () => {
     const withPlaybook = renderSystemPrompt({
       ...input,

@@ -10,6 +10,7 @@ export interface SystemPromptInput {
   tone?: string;                    // owner-chosen tone (e.g. "cálido y cercano")
   extraEscalationKeywords?: string[]; // extra words that trigger a human handoff
   lessons?: string[];               // flywheel: rules distilled from owner takeovers
+  customInstructions?: string;      // owner rules ADDED to the generated prompt (never replace it)
 }
 
 const TEMPLATE = `<output_language>
@@ -68,6 +69,8 @@ Si una pregunta no tiene respuesta en lo que sabes, escalas a un humano.
 
 {{LECCIONES}}
 
+{{INSTRUCCIONES}}
+
 <escalation_rules>
 Llama handoffHuman cuando:
 - El cliente lo pide explícitamente ("humano", "real person", "alguien", "el dueño").
@@ -122,6 +125,16 @@ ${lessons.map((l) => `- ${l}`).join("\n")}
 </lecciones_aprendidas>`
       : "";
 
+  // Reglas escritas por el dueño en el panel. Se SUMAN al prompt generado —
+  // el resto del cerebro (contexto, playbook, KB, anti-invento) queda intacto.
+  const instructions = input.customInstructions?.trim();
+  const instructionsBlock = instructions
+    ? `<instrucciones_del_negocio>
+Reglas adicionales del dueño del negocio. Síguelas SIEMPRE:
+${instructions}
+</instrucciones_del_negocio>`
+    : "";
+
   return TEMPLATE
     .replaceAll("{{LANGUAGE}}", input.language)
     .replaceAll("{{BOT_NAME}}", input.botName)
@@ -130,6 +143,7 @@ ${lessons.map((l) => `- ${l}`).join("\n")}
     .replaceAll("{{TOOL_LIST}}", toolList)
     .replaceAll("{{NICHO_PLAYBOOK}}", input.nichoPlaybook ?? "")
     .replaceAll("{{LECCIONES}}", lessonsBlock)
+    .replaceAll("{{INSTRUCCIONES}}", instructionsBlock)
     .replaceAll("{{TONE_LINE}}", toneLine)
     .replaceAll("{{EXTRA_ESCALATION}}", extraEscalation);
 }
@@ -139,6 +153,7 @@ export interface SystemPromptOverrides {
   extraEscalationKeywords?: string[];
   botName?: string;
   lessons?: string[];
+  customInstructions?: string;
 }
 
 export function systemPromptFromEnv(
@@ -158,5 +173,6 @@ export function systemPromptFromEnv(
     tone: overrides?.tone,
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
+    customInstructions: overrides?.customInstructions,
   });
 }

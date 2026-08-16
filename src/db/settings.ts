@@ -4,6 +4,10 @@ import { Db } from "./client";
 // Empty/absent => default (see settings-loader.ts).
 export const SETTING_KEYS = {
   systemPromptOverride: "system_prompt_override",
+  // Reglas del dueño que se SUMAN al prompt generado; NO lo reemplazan (eso es
+  // system_prompt_override). Es el campo seguro para "siempre ofrece agendar
+  // cita" sin perder el contexto del negocio, el playbook ni el KB.
+  customInstructions: "custom_instructions",
   businessContext: "business_context",
   botName: "bot_name",
   tone: "tone",

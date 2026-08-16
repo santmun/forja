@@ -557,6 +557,21 @@ export async function renderNodeModal(env: Env, nodeId: string, saved = false): 
         </button>
       </form>
 
+      <form hx-post="/admin/agente/node/brain/save" hx-target="#modal-root" hx-swap="innerHTML" class="mb-5">
+        <div class="flex items-center justify-between mb-1.5">
+          <label for="custom_instructions" class="text-[12.5px] font-medium text-cream">✍️ Instrucciones</label>
+          <span class="text-[9.5px] tracking-[.05em]" style="color:var(--ok);border:1px solid var(--ok);padding:1px 7px">se suman</span>
+        </div>
+        <p class="text-[11px] mb-2 leading-relaxed" style="color:var(--dim)">Reglas para tu bot — "siempre ofrece agendar una cita al final", "no des precios por chat". Esto se <b>suma</b> al prompt automático: tu información del negocio, el playbook y la base de conocimiento quedan intactos.${hasOverride
+          ? ` <span style="color:var(--accent-2)">⚠ Tienes un prompt manual activo: estas instrucciones no aplican hasta que vuelvas al automático (abajo).</span>`
+          : ""}</p>
+        <textarea id="custom_instructions" name="custom_instructions" rows="4"
+                  placeholder="Ej. Siempre ofrece agendar una cita al final."
+                  class="w-full font-mono text-[11px] p-3 outline-none resize-y"
+                  style="background:var(--bg);border:1px solid var(--line);color:var(--cream)">${esc(d.settings[SETTING_KEYS.customInstructions] ?? "")}</textarea>
+        <button type="submit" class="ghostbtn text-[12.5px] cursor-pointer mt-2" style="background:var(--panel2);border:1px solid var(--line);color:var(--muted);padding:8px 16px">Guardar instrucciones</button>
+      </form>
+
       <form hx-post="/admin/agente/node/brain/save" hx-target="#modal-root" hx-swap="innerHTML">
         <div class="flex items-center justify-between mb-1.5">
           <label for="system_prompt_override" class="text-[12.5px] font-medium text-cream">Prompt del agente</label>
