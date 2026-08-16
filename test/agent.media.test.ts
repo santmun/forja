@@ -372,4 +372,41 @@ describe("SupportAgent.ingest — bot_paused (settings)", () => {
 
     expect(storage.setAlarm).toHaveBeenCalledTimes(1);
   });
+
+  it("re-arms the alarm when it did not get registered", async () => {
+    stubSettings();
+    const { agent, storage } = makeAgent({ tier: "free" });
+    stubConversations();
+    // The platform silently dropped the alarm: nothing is armed afterwards.
+    storage.getAlarm.mockResolvedValue(null);
+
+    await agent.ingest({
+      channel: "telegram",
+      channelUserId: "u1",
+      text: "hola",
+    });
+
+    expect(storage.setAlarm).toHaveBeenCalledTimes(2);
+  });
+
+  it("processes almost immediately when a buffered message is stranded", async () => {
+    stubSettings();
+    const { agent, storage } = makeAgent({ tier: "free" });
+    stubConversations();
+    // A previous message never got processed because its alarm was lost.
+    agent.setState({
+      ...agent.state,
+      pendingMessages: [{ text: "hola", receivedAt: Date.now() - 600_000 }],
+    });
+
+    const before = Date.now();
+    await agent.ingest({
+      channel: "telegram",
+      channelUserId: "u1",
+      text: "hola?",
+    });
+
+    const alarmAt = storage.setAlarm.mock.calls[0][0];
+    expect(alarmAt - before).toBeLessThan(2_000);
+  });
 });
