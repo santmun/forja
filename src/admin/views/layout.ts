@@ -222,6 +222,19 @@ const GLOBAL_SCRIPT = `
   (function(){ var n=0; var t=setInterval(function(){ if(window.lucide){drawIcons();clearInterval(t);} if(++n>25) clearInterval(t); },120); })();
   document.body.addEventListener("htmx:afterSwap", drawIcons);
   document.body.addEventListener("htmx:oobAfterSwap", drawIcons);
+  // Pausa del polling: no refresques el inbox mientras el usuario lee (o si la
+  // pestaña está en segundo plano). htmx evalúa este filtro en cada tick de
+  // 'every Ns[...]' y solo dispara la petición si devuelve true. En el hilo
+  // (contenedor flex column-reverse) "al día" = scroll pegado al final, donde
+  // scrollTop ≈ 0; leer historial lo aleja (positivo en Chrome, negativo en
+  // Firefox), de ahí el Math.abs. Al volver al final, el siguiente tick se pone
+  // al día solo.
+  window.puedeRefrescar = function(id){
+    if (document.hidden) return false;
+    var el = document.getElementById(id);
+    if (!el) return true;
+    return Math.abs(el.scrollTop) < 40;
+  };
   document.addEventListener("keydown", function(e){
     if (e.key === "Escape") {
       var root = document.getElementById("modal-root");
