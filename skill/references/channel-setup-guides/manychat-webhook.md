@@ -33,7 +33,7 @@ Al terminar esta guía, cuando un cliente te escriba por Instagram (o Messenger,
    ```
    Cuando te lo pida, pega la API Key y dale Enter.
 
-> Esta misma llave la vas a usar más abajo como un encabezado (`X-Api-Key`) para que tu bot confirme que el mensaje viene de TU ManyChat y no de un desconocido.
+> Esta misma llave la vas a usar más abajo como un encabezado (`X-Api-Key`) para que tu bot confirme que el mensaje viene de TU ManyChat y no de un desconocido. Para que tu bot **de verdad la revise**, hay que guardarla también como `MANYCHAT_WEBHOOK_SECRET` — ese paso viene en el Paso 3.
 
 ---
 
@@ -69,6 +69,17 @@ Aquí le dices a ManyChat: "cuando llegue un mensaje, pregúntale a mi bot qué 
 5. Agrega un **header** (encabezado):
    - Nombre: `X-Api-Key`
    - Valor: tu `MANYCHAT_API_KEY` (la misma llave del Paso 1)
+6. **Ya que guardaste el flujo con el header**, dile a tu bot que empiece a exigirlo:
+   ```bash
+   pnpm wrangler secret put MANYCHAT_WEBHOOK_SECRET
+   ```
+   Pega **el mismo valor** que pusiste en el header y dale Enter. Desde ahí, tu bot
+   contesta `401` a cualquier petición que no traiga esa llave.
+
+   > ⚠️ **En este orden.** Si guardas el secreto ANTES de agregar el header en
+   > ManyChat, tu bot empieza a rechazar los mensajes de tus propios clientes.
+   > Mientras `MANYCHAT_WEBHOOK_SECRET` no exista, el bot acepta todo — igual que
+   > siempre — así que no se te cae nada por dejarlo para el final.
 
 ---
 
@@ -102,7 +113,7 @@ Cuando el bot necesita pasarte un cliente a ti (handoff), **no** te avisa por Ma
 ## Si algo falla
 
 - **El bot no contesta en el canal:** revisa que la URL del External Request termine en `/webhooks/manychat` y que el método sea `POST`.
-- **Error de autorización / rechaza el mensaje:** confirma que agregaste el header `X-Api-Key` con tu `MANYCHAT_API_KEY` exacta, y que corriste `pnpm run deploy` después de guardar el secreto.
+- **Error de autorización / el bot responde `401`:** el valor del header `X-Api-Key` en ManyChat y el de `MANYCHAT_WEBHOOK_SECRET` tienen que ser **idénticos**. Vuelve a guardar el secreto (`pnpm wrangler secret put MANYCHAT_WEBHOOK_SECRET`) copiando y pegando el mismo texto, y corre `pnpm run deploy`.
 - **El cliente no ve la respuesta:** asegúrate de que mapeaste el campo `reply` en la acción "Send Message".
 - **No llega ningún mensaje a tu bot:** revisa que el canal (Instagram/Messenger/etc.) esté bien conectado en ManyChat y que el flujo esté activo (publicado).
 
@@ -114,7 +125,7 @@ Cuando el bot necesita pasarte un cliente a ti (handoff), **no** te avisa por Ma
 |---|---|
 | Secreto | `MANYCHAT_API_KEY` (y `OWNER_TELEGRAM_CHAT_ID` o `TWILIO_HANDOFF_CONTENT_SID` + `OWNER_WA_NUMBER` para los avisos al dueño) |
 | Webhook | `<worker-url>/webhooks/manychat` (método `POST`) |
-| Header | `X-Api-Key: <MANYCHAT_API_KEY>` |
+| Header | `X-Api-Key: <MANYCHAT_API_KEY>` (guarda ese mismo valor como `MANYCHAT_WEBHOOK_SECRET` para que el bot lo exija) |
 | Campo de respuesta | `reply` (mapéalo a "Send Message") |
 | Canales | Instagram, Messenger, WhatsApp, Telegram (conectados en ManyChat) |
 | Costo | Plan de ManyChat (tiene capa gratis limitada) |

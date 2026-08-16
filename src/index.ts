@@ -14,7 +14,7 @@ import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
 import { detectKind } from "./learn/fieldPath";
 import { saveCapture, isLearnMode } from "./learn/mapping";
-import { tokensMatch } from "./http-auth";
+import { tokensMatch, manychatWebhookAllowed } from "./http-auth";
 import { apiApp } from "./api";
 
 export { SupportAgent } from "./agent";
@@ -55,7 +55,15 @@ async function routeToAgent(c: { req: { raw: Request }; env: Env; text: (t: stri
 }
 
 app.post("/webhooks/telegram", (c) => routeToAgent(c, telegramAdapter));
-app.post("/webhooks/manychat", (c) => routeToAgent(c, manychatAdapter));
+// ManyChat — guarded by the X-Api-Key header the setup guide already asks for.
+// No-op until MANYCHAT_WEBHOOK_SECRET is set, so existing bots keep working.
+app.post("/webhooks/manychat", (c) => {
+  if (!manychatWebhookAllowed(c.req.raw, c.env)) {
+    console.warn("manychat webhook rejected: missing or invalid X-Api-Key");
+    return c.text("unauthorized", 401);
+  }
+  return routeToAgent(c, manychatAdapter);
+});
 // WhatsApp (Twilio): rutea el mensaje entrante al bot de clientes (Claude). El
 // body se lee UNA vez; ack con TwiML vacío para que Twilio no reenvíe el cuerpo
 // como mensaje.
