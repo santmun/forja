@@ -125,6 +125,33 @@ describe("admin routes — navigation", () => {
     expect(await res.text()).toContain("Test Biz");
   });
 
+  // El campo escribe system_prompt_override: lo que se escriba ahí sustituye al
+  // prompt completo. Con la etiqueta anterior ("Instrucciones personalizadas")
+  // y su ejemplo de una sola regla, era razonable creer que se sumaba.
+  it("warns that the prompt field replaces the whole prompt when it is empty", async () => {
+    const res = await adminApp.fetch(req("/config", { headers: authHeaders }), makeEnv());
+    const html = await res.text();
+    expect(html).toContain("REEMPLAZA el prompt completo");
+    expect(html).toContain("Mi Agente → Flujo");
+    // El ejemplo viejo invitaba justo al error que este aviso evita.
+    expect(html).not.toContain("Ej. Siempre ofrece agendar una cita al final.");
+  });
+
+  it("shows manual mode when a prompt override is already saved", async () => {
+    const env = makeEnv(
+      makeStubDb([
+        {
+          frag: "SELECT key, value FROM settings",
+          all: [{ key: SETTING_KEYS.systemPromptOverride, value: "Responde siempre en verso." }],
+        },
+      ]),
+    );
+    const res = await adminApp.fetch(req("/config", { headers: authHeaders }), env);
+    const html = await res.text();
+    expect(html).toContain("Modo manual");
+    expect(html).toContain("Responde siempre en verso.");
+  });
+
   it("exports leads as CSV", async () => {
     const res = await adminApp.fetch(req("/leads/export.csv", { headers: authHeaders }), makeEnv());
     expect(res.status).toBe(200);
