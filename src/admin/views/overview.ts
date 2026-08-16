@@ -12,6 +12,7 @@ import { InsightsRepo } from "../../db/insights";
 import { SuggestionsRepo } from "../../db/suggestions";
 import { channelLabel } from "../../channels/labels";
 import { getNiche } from "../../niches";
+import { avatarContacto } from "./avatarContacto";
 
 function esc(s: string): string {
   return s.replace(
@@ -29,13 +30,6 @@ function ago(ms: number | null | undefined): string {
   const h = Math.floor(min / 60);
   if (h < 24) return `hace ${h} h`;
   return `hace ${Math.floor(h / 24)} d`;
-}
-
-/** Two-letter avatar initials from a display name (or channel-id fallback). */
-function initialsOf(label: string): string {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
 }
 
 /** "auto" or the concrete model id the agent is pinned to. */
@@ -197,12 +191,12 @@ export async function renderOverview(env: Env): Promise<string> {
       .map((c) => {
         const label = c.display_name ?? c.channel_user_id ?? "—";
         const name = esc(label);
-        const initials = initialsOf(label);
+
         const preview = esc((c.last_msg ?? "").replace(/\s+/g, " ").slice(0, 60)) || "—";
         const chanColor = c.channel === "twilio" || c.channel === "whatsapp" ? "var(--info)" : "var(--accent-2)";
         return `
         <a href="/admin/conversations?c=${encodeURIComponent(c.id)}" class="convrow flex items-center gap-3" style="padding:12px 18px;border-top:1px solid var(--line);cursor:pointer">
-          <div class="flex items-center justify-center flex-none" style="width:36px;height:36px;background:var(--raise);border:1px solid var(--linelit);font-size:12px;font-weight:700;color:var(--accent)">${initials}</div>
+          ${avatarContacto(label, c.channel_user_id ?? c.id, 36)}
           <div class="flex-1" style="min-width:0">
             <div class="flex items-center gap-2">
               <span class="text-[13px] font-semibold text-cream">${name}</span>

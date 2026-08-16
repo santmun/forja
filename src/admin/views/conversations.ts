@@ -18,6 +18,7 @@ import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { avatarContacto } from "./avatarContacto";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -94,13 +95,6 @@ const smallPill = (color: string) =>
   `font-size:9px;letter-spacing:.03em;color:${color};border:1px solid ${color};padding:1px 6px`;
 const statusBadge = (color: string) =>
   `font-size:10px;letter-spacing:.03em;color:${color};border:1px solid ${color};padding:2px 8px`;
-
-/** Two-letter avatar initials from a display name (or channel-id fallback). */
-function initialsOf(label: string): string {
-  const parts = label.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  return parts.slice(0, 2).map((w) => w[0]?.toUpperCase() ?? "").join("") || "?";
-}
 
 /** WhatsApp gets info-blue, every other channel gets accent-2 amber — mirrors the mockup's WA/other split. */
 function channelColor(channel: string): string {
@@ -184,12 +178,12 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
       const selected = r.id === p.selectedId;
       const name = escapeHtml(r.display_name ?? r.channel_user_id ?? "—");
       const preview = escapeHtml((r.last_msg ?? "").replace(/\s+/g, " ").slice(0, 60));
-      const initials = initialsOf(r.display_name ?? r.channel_user_id ?? "?");
+      const etiqueta = r.display_name ?? r.channel_user_id ?? "?";
       const chanColor = channelColor(r.channel);
 
       return `
       <a href="${inboxUrl(p, r.id)}" class="convrow" style="display:flex;gap:11px;padding:12px 14px;border-bottom:1px solid var(--line);cursor:pointer;${selected ? "background:var(--panel2);border-left:2px solid var(--accent)" : "border-left:2px solid transparent"}">
-        <div style="width:34px;height:34px;flex:none;background:var(--raise);border:1px solid var(--linelit);display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:700;color:var(--accent)">${initials}</div>
+        ${avatarContacto(etiqueta, r.channel_user_id ?? r.id, 34)}
         <div style="min-width:0;flex:1">
           <div style="display:flex;align-items:center;gap:6px">
             <span style="font-size:12.5px;font-weight:600;white-space:nowrap;text-overflow:ellipsis;overflow:hidden;color:var(--cream)">${name}</span>
