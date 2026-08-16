@@ -235,8 +235,18 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     paused ? "⏸ bot pausado · tú tienes el control" : "🟢 bot activo"
   }</span>`;
 
+  // "NEUTRAL" NO SE MUESTRA. El analizador clasifica cómo quedó el cliente en
+  // cuatro casillas, y "neutral" es la de "no detecté nada": es la enorme
+  // mayoría de las conversaciones. Una etiqueta que sale casi siempre y no dice
+  // nada solo roba sitio en la barra y le quita fuerza a las que sí importan.
+  //
+  // Sin etiqueta = todo normal. Cuando aparezca una, significa algo.
+  // Las alertas del dueño no cambian: nunca dependieron de "neutral", y la
+  // lista de conversaciones ya filtraba así (solo frustrated/angry).
   const sentBadge =
-    insight?.sentiment && SENTIMENT_BADGE[insight.sentiment]
+    insight?.sentiment &&
+    insight.sentiment !== "neutral" &&
+    SENTIMENT_BADGE[insight.sentiment]
       ? `<span style="${statusBadge(SENTIMENT_COLOR[insight.sentiment])}">${SENTIMENT_BADGE[insight.sentiment].txt}</span>`
       : "";
 
