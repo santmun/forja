@@ -16,7 +16,7 @@ import { generateText } from "ai";
 import type { Env } from "../env";
 import { Db } from "../db/client";
 import { InsightsRepo } from "../db/insights";
-import { MessagesRepo } from "../db/messages";
+import { esNotaInterna, sinMarcaNota, MessagesRepo } from "../db/messages";
 import { SuggestionsRepo } from "../db/suggestions";
 import { SettingsRepo, SETTING_KEYS } from "../db/settings";
 import { createModel } from "../llm/provider";
@@ -116,7 +116,11 @@ export async function detectLessons(env: Env, limit = 3): Promise<FlywheelResult
     try {
       const history = await msgs.lastN(conv.conversation_id, 30);
       const transcript = history
-        .map((m) => `${m.role === "user" ? "Cliente" : m.role === "owner" ? "Dueño" : "Bot"}: ${m.content.slice(0, 400)}`)
+        .map((m) =>
+          m.role === "owner" && esNotaInterna(m.content)
+            ? `Nota interna (el cliente NO la vio): ${sinMarcaNota(m.content).slice(0, 400)}`
+            : `${m.role === "user" ? "Cliente" : m.role === "owner" ? "Dueño" : "Bot"}: ${m.content.slice(0, 400)}`,
+        )
         .join("\n");
 
       const result = await generateText({

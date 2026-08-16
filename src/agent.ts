@@ -4,7 +4,7 @@ import type { SystemModelMessage } from "ai";
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { ConversationsRepo } from "./db/conversations";
-import { MessagesRepo } from "./db/messages";
+import { esNotaInterna, sinMarcaNota, MessagesRepo } from "./db/messages";
 import { isPro } from "./config";
 import { resolveAgentConfig } from "./settings-loader";
 import { buildTools } from "./tools";
@@ -213,14 +213,25 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
 
     // Load history (last 20)
     const history = await msgs.lastN(convId, 20);
-    const aiMessages: any[] = history.slice(0, -1).map((m) => ({
-      role: (m.role === "tool"
-        ? "user"
-        : m.role === "owner"
-          ? "assistant"
-          : m.role) as "user" | "assistant",
-      content: m.content,
-    }));
+    const aiMessages: any[] = history.slice(0, -1).map((m) => {
+      // Una NOTA INTERNA no es algo que el bot dijo: es el equipo contándole qué
+      // pasó por fuera. Pasada como suya (owner → assistant), el bot cree
+      // habérselo dicho al cliente y puede darlo por sabido.
+      if (m.role === "owner" && esNotaInterna(m.content)) {
+        return {
+          role: "user" as const,
+          content: `(Nota interna del equipo. El cliente NO vio esto: ${sinMarcaNota(m.content)})`,
+        };
+      }
+      return {
+        role: (m.role === "tool"
+          ? "user"
+          : m.role === "owner"
+            ? "assistant"
+            : m.role) as "user" | "assistant",
+        content: m.content,
+      };
+    });
     // Build the LAST user message multimodal-aware: if it carries an
     // [IMAGE_URL: ...] marker AND we're on the Pro tier, attach the image.
     const lastUserMsg = history[history.length - 1];

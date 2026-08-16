@@ -18,6 +18,7 @@ import { SENTIMENT_BADGE } from "./insights";
 import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
+import { esNotaInterna, sinMarcaNota } from "../../db/messages";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -297,10 +298,22 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
         </div>`;
       }
 
+      // NOTA INTERNA: no salió por ningún canal, así que no puede parecer un
+      // mensaje enviado. Va centrada, en gris y con su rótulo — y sin el pie
+      // "Tú · enviado" que llevan los que sí salieron.
+      if (m.role === "owner" && esNotaInterna(m.content)) {
+        return `
+      <div style="align-self:center;max-width:78%;text-align:center;padding:2px 0">
+        <div style="font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--dim)">📝 Nota para el bot · la persona no la vio</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px;white-space:pre-wrap">${escapeHtml(sinMarcaNota(m.content))}</div>
+        <div style="font-size:9.5px;color:var(--dim);margin-top:2px">${time}</div>
+      </div>`;
+      }
+
       const isOwner = m.role === "owner";
       const cost = turnCost(m);
       const meta = isOwner
-        ? `Tú · ${time}`
+        ? `Tú · enviado · ${time}`
         : [m.model_used ? modelShort(m.model_used) : null, cost || null, time].filter(Boolean).join(" · ");
       const bubbleBg = isOwner
         ? "background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.4)"

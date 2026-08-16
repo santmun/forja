@@ -2,6 +2,30 @@ import { Db } from "./client";
 
 export type MessageRole = "user" | "assistant" | "tool" | "owner";
 
+/**
+ * NOTAS INTERNAS — lo que el equipo le cuenta AL BOT, y el cliente nunca ve.
+ *
+ * Al devolverle una conversación al bot se puede dejar una nota ("ya le
+ * confirmé el pago por fuera"). Esa nota se guarda como mensaje del dueño, y
+ * hasta ahora era indistinguible de un mensaje que SÍ se le envió al cliente:
+ * el panel la dibujaba igual, con el mismo pie. Es muy fácil escribir algo ahí
+ * y quedarse con la duda de si le llegó a la persona.
+ *
+ * Con la marca, la nota se puede tratar como lo que es en los CUATRO sitios
+ * donde ese texto se reusa: el hilo, el bot, el co-pilot y el flywheel.
+ *
+ * Las notas viejas (sin marca) se siguen viendo como antes.
+ */
+export const MARCA_NOTA = "[[NOTA]]";
+
+export function esNotaInterna(contenido: string): boolean {
+  return contenido.startsWith(MARCA_NOTA);
+}
+
+export function sinMarcaNota(contenido: string): string {
+  return esNotaInterna(contenido) ? contenido.slice(MARCA_NOTA.length).trim() : contenido;
+}
+
 export interface Message {
   id: string;
   conversation_id: string;
