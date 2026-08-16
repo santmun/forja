@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -20,6 +20,19 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["test/**/*.test.ts"],
+    // macOS mete un archivo AppleDouble (`._algo`) al lado de cada archivo real
+    // cuando empaqueta un tar/zip con atributos extendidos. Los que quedan como
+    // `._loquesea.test.ts` casan con el `include` de arriba, y Vitest intenta
+    // cargarlos como módulos: no son JavaScript, así que se lleva por delante el
+    // worker con un "Worker exited unexpectedly" que no dice qué archivo fue.
+    //
+    // Nada los genera dentro del repo — llegan en el tarball de distribución.
+    // Esto es la red de seguridad del lado del consumidor: aunque el paquete
+    // venga sucio, la suite corre.
+    //
+    // `exclude` reemplaza el valor por defecto en vez de sumarse, así que hay que
+    // reponerlo con configDefaults o se pierde el filtro de node_modules.
+    exclude: [...configDefaults.exclude, "**/._*"],
     pool: "forks",
     poolOptions: { forks: { singleFork: true } },
     // Most tests spin up a real Miniflare (workerd process + full D1 schema)
