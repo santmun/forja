@@ -254,14 +254,14 @@ Pregunta qué quieres que haga tu bot. Es de selección múltiple (puede elegir 
 - [ ] Agendar citas (se conecta con Cal.com)
 - [ ] Mostrar catálogo de productos/servicios
 
-Como este repo es **Pro**, todas estas tareas están disponibles. Las herramientas (tools) que se activan según lo que elija:
+Las herramientas (tools) que se activan según lo que elija. **Agendar citas ya es GRATIS** (solo hay que conectar Cal.com); consultar catálogo sigue siendo Forja+ (Pro):
 
-- `searchKb` (FAQ con base de conocimiento) — siempre activa.
-- `handoffHuman` (pasar la conversación a un humano) — siempre activa.
-- `pauseBot` (pausar el bot en una conversación) — siempre activa.
-- `captureLead` (capturar prospectos) — si eligió leads.
-- `scheduleAppointment` (agendar con Cal.com) — si eligió citas.
-- `catalogQuery` (consultar catálogo en R2) — si eligió catálogo.
+- `searchKb` (FAQ con base de conocimiento) — siempre activa. **Gratis.**
+- `handoffHuman` (pasar la conversación a un humano) — siempre activa. **Gratis.**
+- `pauseBot` (pausar el bot en una conversación) — siempre activa. **Gratis.**
+- `captureLead` (capturar prospectos) — si eligió leads. **Gratis.**
+- `scheduleAppointment` (agendar con Cal.com) — si eligió citas. **Gratis** (necesita conectar Cal.com: `CALCOM_API_KEY` + event type ID).
+- `catalogQuery` (consultar catálogo en R2) — si eligió catálogo. **Forja+ (Pro).**
 
 Además, en Pro el bot también entiende **notas de voz** (las transcribe con Whisper) y **fotos** (las describe con un modelo de visión). No tienes que activar nada extra para eso.
 
