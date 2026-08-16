@@ -98,6 +98,10 @@ const DICT = {
     updInstalled: (a, b) => `Instalado: v${a}  ·  Última: v${b}`,
     updUpToDate: "Ya estás en la última versión.",
     updDone: (v) => `Actualizado a v${v}  (tu config y tu KB se conservaron)`,
+    updBackup: (p) => `Respaldé tu versión anterior en ${p} — por si quieres recuperar algo.`,
+    updPreserved: "Se conservaron: tu configuración, tu base de conocimiento, tu wrangler.toml y lo que ajustaste en el panel o con /prompt.",
+    updReplaced: "Se actualizó: el motor del bot (todo lo demás).",
+    updGolden: "Recuerda: los cambios de comportamiento van en /prompt o tu config, NO en el código — así sobreviven a todos los updates.",
     updTierUp: "⚡ Tu licencia es Forja+ — subí tu bot a PRO. Al desplegar, superpoderes prendidos.",
     updPublish: "Para publicar los cambios, pídele a tu agente:",
     updPublishCmd: '"reinstala dependencias y despliega mi bot"',
@@ -205,6 +209,10 @@ const DICT = {
     updInstalled: (a, b) => `Installed: v${a}  ·  Latest: v${b}`,
     updUpToDate: "You're on the latest version.",
     updDone: (v) => `Updated to v${v}  (your config and KB were preserved)`,
+    updBackup: (p) => `Backed up your previous version to ${p} — in case you want to recover anything.`,
+    updPreserved: "Preserved: your configuration, your knowledge base, your wrangler.toml, and anything you set in the panel or with /prompt.",
+    updReplaced: "Updated: the bot's engine (everything else).",
+    updGolden: "Remember: behavior changes go in /prompt or your config, NOT in the code — that way they survive every update.",
     updTierUp: "⚡ Your license is Forja+ — bumped your bot to PRO. Deploy and the superpowers are on.",
     updPublish: "To publish the changes, ask your agent:",
     updPublishCmd: '"reinstall dependencies and deploy my bot"',
@@ -603,6 +611,33 @@ function extractOver(buf, dir, slug, version) {
     "--exclude=./.bot-state.json", "--exclude=./.bot-setup.json", `--exclude=./${MARKER}`]);
   rmSync(tgz, { force: true });
   writeMarker(dir, slug, version);
+}
+
+// P0 — respaldo automático ANTES de traer el motor nuevo: snapshot .tgz de la carpeta
+// del bot para que el miembro nunca pierda ediciones (aunque las haya hecho en el
+// código del motor, no solo en member/). Es tar (no git): funciona en Mac/Linux/Windows
+// sin setup ni auth. Nunca bloquea el update: si algo falla, devuelve null y seguimos.
+function backupBeforeUpdate(dir, fromVer) {
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19); // 2026-08-15T14-30-05
+  const backDir = join(dir, ".forja-backups");
+  const dest = join(backDir, `${stamp}_v${fromVer}.tgz`);
+  try {
+    mkdirSync(backDir, { recursive: true });
+    // -C dir + "." archiva todo; los --exclude evitan node_modules, el propio backup y git.
+    execFileSync("tar", ["-czf", dest, "-C", dir,
+      "--exclude=./node_modules", "--exclude=./.forja-backups",
+      "--exclude=./.git", "--exclude=./.wrangler",
+      // NO archivar secretos: el update nunca los pisa, así que no hay nada que respaldar,
+      // y así el .tgz jamás contiene llaves (importante si algún día se sube a GitHub).
+      "--exclude=./.dev.vars", "--exclude=./.dev.vars.*",
+      "--exclude=./.env", "--exclude=./.env.*", "."]);
+    // Hygiene: conserva solo los 5 respaldos más recientes (stamp ISO ⇒ orden lexical = cronológico).
+    try {
+      const olds = readdirSync(backDir).filter((f) => f.endsWith(".tgz")).sort();
+      for (const f of olds.slice(0, -5)) rmSync(join(backDir, f), { force: true });
+    } catch { /* pruning best-effort */ }
+    return dest;
+  } catch { return null; }
 }
 
 // Entrega los archivos DEFAULT nuevos de member/ que el miembro aún NO tenga
@@ -1188,9 +1223,14 @@ async function cmdUpdate(dirArg, flags) {
   process.stdout.write(C.dim(`\n  ${t().downloading("v" + bot.version)}`));
   const { buf, version } = await download(bot.slug, key);
   console.log(C.green("✓") + C.dim(` ${(buf.length / 1024).toFixed(0)} KB`));
+  const backupPath = backupBeforeUpdate(dir, marker.version);  // P0: respaldo ANTES de sobrescribir
   extractOver(buf, dir, bot.slug, version);
   ensureMemberDefaults(buf, dir); // entrega defaults nuevos de member/ sin pisar los del miembro
   console.log(C.green(`\n  ✓ ${t().updDone(version)}\n`));
+  if (backupPath) console.log("  " + C.dim(t().updBackup(backupPath.slice(dir.length + 1))));
+  console.log("  " + C.dim(t().updPreserved));
+  console.log("  " + C.dim(t().updReplaced));
+  console.log("  " + C.yellow(t().updGolden) + "\n");
   if (bumpTierIfUpgraded(dir, v.plan)) {
     console.log("  " + C.yellow(t().updTierUp) + "\n");
   }
