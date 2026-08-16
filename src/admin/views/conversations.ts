@@ -210,6 +210,45 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
 
 // --- Right pane: live thread (header + messages, polled) ----------------------
 
+
+/**
+ * EL TELÉFONO DEL CLIENTE, SIEMPRE VISIBLE Y COPIABLE.
+ *
+ * En cuanto alguien le pone nombre a un contacto, el número desaparecía del
+ * panel — y es lo ÚNICO con lo que el equipo puede contactar a esa persona
+ * desde otro celular, o pasárselo a alguien que no tiene acceso al panel.
+ *
+ * Telegram no finge ser un teléfono: ahí se muestra el id tal cual, porque
+ * escribir "+42" sería mentir.
+ */
+function esTelefono(canal: string | null | undefined): boolean {
+  const c = (canal ?? "").toLowerCase();
+  return c === "whatsapp" || c === "twilio" || c === "meta";
+}
+
+/** "51999888777" -> "+51 999 888 777": se lee, y se copia entero de un clic. */
+function telefonoLegible(id: string): string {
+  const d = (id ?? "").replace(/\D/g, "");
+  if (d.length < 8) return id;
+  return "+" + d.replace(/^(\d{1,3})(\d{3})(\d{3})(\d{3,})$/, "$1 $2 $3 $4");
+}
+
+function bloqueContacto(canal: string | null | undefined, idCanal: string): string {
+  const tel = esTelefono(canal);
+  const visible = tel ? telefonoLegible(idCanal) : idCanal;
+  const crudo = tel ? "+" + (idCanal ?? "").replace(/\D/g, "") : idCanal;
+  const enlace = tel
+    ? `<a href="https://api.whatsapp.com/send?phone=${encodeURIComponent((idCanal ?? "").replace(/\D/g, ""))}" target="_blank" rel="noopener"
+         title="Abrir este chat en tu WhatsApp" style="color:inherit;text-decoration:none;border-bottom:1px dotted currentColor">${escapeHtml(visible)}</a>`
+    : escapeHtml(visible);
+  return `<span style="display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--dim)">
+    ${enlace}
+    <button type="button" title="Copiar" aria-label="Copiar el contacto"
+            onclick="navigator.clipboard.writeText('${crudo.replace(/'/g, "")}');this.textContent='✓';setTimeout(()=>this.textContent='⧉',1200)"
+            style="background:none;border:none;color:inherit;cursor:pointer;font-size:11px;padding:0 2px;line-height:1">⧉</button>
+  </span>`;
+}
+
 export async function renderThreadLive(env: Env, convId: string): Promise<string> {
   const db = new Db(env.DB);
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ?", [convId]);
@@ -270,7 +309,8 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
 
   const header = `
   <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)">
-    <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name ?? conv.channel_user_id)}</span>
+    <span style="font-family:'Space Grotesk';font-weight:600;font-size:14px;color:var(--cream)">${escapeHtml(conv.display_name || "Sin nombre")}</span>
+    ${bloqueContacto(conv.channel, conv.channel_user_id)}
     <span style="${smallPill("var(--info)")}">${escapeHtml(channelLabel(conv.channel))}</span>
     ${statusPill}
     ${sentBadge}
