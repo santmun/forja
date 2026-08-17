@@ -48,4 +48,23 @@ export class TicketsRepo {
       [Date.now(), resolvedBy, id],
     );
   }
+
+  /**
+   * Borra un ticket para siempre.
+   *
+   * Distinto de resolver: resolver deja el registro con su historia, borrar lo
+   * saca. Es para tickets de prueba o abiertos por error, no para el flujo
+   * normal — un ticket atendido se resuelve, no se borra.
+   *
+   * Si el ticket era el abierto de una conversación, se limpia esa referencia:
+   * de lo contrario la conversación queda apuntando a algo que ya no existe y
+   * el inbox la sigue mostrando con "ticket abierto".
+   */
+  async delete(id: string): Promise<void> {
+    await this.db.run(
+      "UPDATE conversations SET open_ticket_id = NULL WHERE open_ticket_id = ?",
+      [id],
+    );
+    await this.db.run("DELETE FROM tickets WHERE id = ?", [id]);
+  }
 }

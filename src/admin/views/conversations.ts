@@ -320,6 +320,17 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     ${sentBadge}
     ${openTicket > 0 ? `<span style="${statusBadge("var(--accent-2)")}">🔔 ticket abierto</span>` : ""}
     ${controls}
+
+    <!-- Eliminar conversación. Va al final, en gris y sin destacar: es
+         irreversible y no debe competir visualmente con pausar o devolver al
+         bot, que son las acciones del día a día. El confirm() nombra lo que se
+         pierde, porque "¿estás seguro?" a secas no informa nada. -->
+    <form method="POST" action="/admin/conversations/${encodeURIComponent(convId)}/delete"
+          style="margin-left:6px"
+          onsubmit="return confirm('¿Borrar esta conversación y todos sus mensajes? También se borran sus tickets. Los leads se conservan. No se puede deshacer.')">
+      <button class="ghostbtn font-display text-[11px] cursor-pointer" style="padding:6px 11px"
+              title="Borra la conversación y sus mensajes. No se puede deshacer.">Eliminar</button>
+    </form>
   </div>`;
 
   // Messages, DESC in the DOM + column-reverse = pinned to bottom.
