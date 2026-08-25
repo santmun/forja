@@ -1,3 +1,4 @@
+// @ts-nocheck — el CLI publicado es un JS sin .d.ts; el contrato se afirma en runtime.
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -146,7 +147,7 @@ describe("buildTarArchiveArgv — path-normalization / force-local contract", ()
   it("never puts a raw C: archive name in argv (the Git Bash failure mode)", () => {
     for (const op of ["-xzf", "-czf", "-tzf"] as const) {
       const argv = buildTarArchiveArgv({ op, file: ARTIFACT, fromDir: BOT, forceLocal: true });
-      expect(argv.some((a) => /^[A-Za-z]:/.test(a))).toBe(false);
+      expect(argv.some((a: string) => /^[A-Za-z]:/.test(a))).toBe(false);
       expect(gnuTarTreatsAsRemote(fileOperand(argv))).toBe(false);
     }
   });
