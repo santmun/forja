@@ -98,7 +98,9 @@ const DICT = {
     updInstalled: (a, b) => `Instalado: v${a}  ·  Última: v${b}`,
     updUpToDate: "Ya estás en la última versión.",
     updDone: (v) => `Actualizado a v${v}  (tu config y tu KB se conservaron)`,
-    updModsFirstTime: "Nota: a partir de esta versión el CLI detecta si editaste el motor del bot y te avisa antes de actualizar. Esta vez no pude verificarlo (no había registro previo) — tu respaldo completo queda en .forja-backups/.",
+    updModsUnverified: "⚠ No pude verificar si editaste el motor del bot (no había registro previo).",
+    updModsUnverifiedExplain: "Sin ese registro no sé si hay personalizaciones de código. El update reemplaza los archivos del motor. Tu versión NO se pierde: queda en el respaldo .forja-backups/, pero tendrás que re-aplicar esos cambios después de actualizar.",
+    updModsUnverifiedAgentAsk: "No pude verificar si el motor del bot tiene personalizaciones de código (no había registro previo). Pregúntale al usuario: \"No pude comprobar si editaste el código del bot. La actualización va a reemplazar el motor (queda respaldado). ¿Actualizamos?\"",
     updModsFound: (n) => `⚠ Detecté ${n} archivo(s) del MOTOR con cambios tuyos (personalizaciones de código):`,
     updModsExplain: "El update los reemplaza con la versión nueva. Tu versión NO se pierde: queda en el respaldo .forja-backups/, pero tendrás que re-aplicar esos cambios después de actualizar.",
     updModsProceed: "Continuando (--yes)…",
@@ -218,7 +220,9 @@ const DICT = {
     updInstalled: (a, b) => `Installed: v${a}  ·  Latest: v${b}`,
     updUpToDate: "You're on the latest version.",
     updDone: (v) => `Updated to v${v}  (your config and KB were preserved)`,
-    updModsFirstTime: "Note: from this version on, the CLI detects if you edited the bot's engine and warns you before updating. This time it couldn't verify (no previous record) — your full backup is in .forja-backups/.",
+    updModsUnverified: "⚠ I couldn't verify whether you edited the bot's engine (no previous record).",
+    updModsUnverifiedExplain: "Without that record I can't tell if there are code customizations. The update replaces the engine files. Your work is NOT lost: it stays in the .forja-backups/ backup, but you'll need to re-apply those changes after updating.",
+    updModsUnverifiedAgentAsk: "I couldn't verify whether the bot's engine has CODE customizations (no previous record). Ask the user: \"I couldn't check if you edited the bot's code. The update will replace the engine (it gets backed up). Shall we update?\"",
     updModsFound: (n) => `⚠ Detected ${n} ENGINE file(s) with your local changes (code customizations):`,
     updModsExplain: "The update replaces them with the new version. Your work is NOT lost: it stays in the .forja-backups/ backup, but you'll need to re-apply those changes after updating.",
     updModsProceed: "Continuing (--yes)…",
@@ -627,7 +631,8 @@ function extractOver(buf, dir, slug, version) {
   execFileSync("tar", ["-xzf", tgz, "-C", dir,
     "--exclude=./member/*.local.ts", "--exclude=./member/kb", "--exclude=./wrangler.toml",
     "--exclude=./.dev.vars", "--exclude=./.dev.vars.*", "--exclude=./.env", "--exclude=./.env.*",
-    "--exclude=./.bot-state.json", "--exclude=./.bot-setup.json", `--exclude=./${MARKER}`]);
+    "--exclude=./.bot-state.json", "--exclude=./.bot-setup.json", `--exclude=./${MARKER}`,
+    "--exclude=./.forja-manifest.json"]);
   rmSync(tgz, { force: true });
   writeMarker(dir, slug, version);
 }
@@ -676,7 +681,8 @@ function preservedByUpdate(rel) {
     rel === ".dev.vars" || rel.startsWith(".dev.vars.") ||
     rel === ".env" || rel.startsWith(".env.") ||
     rel === ".bot-state.json" || rel === ".bot-setup.json" ||
-    rel === MARKER
+    rel === MARKER ||
+    rel === MANIFEST
   );
 }
 
@@ -711,8 +717,10 @@ function writeManifest(buf, dir, version) {
   } catch { /* best-effort */ }
 }
 
-// Compara disco vs manifest. null = no hay manifest (primera vez con esta versión
-// del CLI); si hay, regresa la lista de archivos del motor que el miembro editó.
+// Compara disco vs manifest. null = no hay manifest (instalación vieja, o se
+// restauró un .forja-backups/ de antes del guard) — NO se puede saber si el
+// miembro editó el motor. Si hay manifest, regresa la lista de archivos
+// editados (vacía = limpio).
 function detectLocalMods(dir) {
   let m;
   try { m = JSON.parse(readFileSync(join(dir, MANIFEST), "utf8")); } catch { return null; }
@@ -722,6 +730,22 @@ function detectLocalMods(dir) {
     try { if (existsSync(p) && shaFile(p) !== hash) modified.push(rel); } catch { /* ilegible: ignora */ }
   }
   return modified;
+}
+
+// true = hay riesgo de pisar trabajo local: o no se pudo verificar (null) o
+// hay ediciones detectadas. En ambos casos cmdUpdate pide y/N (o --yes).
+function engineOverwriteRisk(mods) {
+  return mods === null || (Array.isArray(mods) && mods.length > 0);
+}
+
+// Cómo tratar un update riesgoso sin colgar un agente/CI.
+//   proceed      → --yes / FORJA_YES: sigue (el backup se hace ANTES de extractOver)
+//   confirm      → humano en TTY: pregunta y/N
+//   abort-agent  → no-interactivo sin --yes: briefing + exit, no pisa nada
+function riskyUpdateGate(flags = {}, assumeYes = ASSUME_YES, isInteractive = interactive()) {
+  if (flags.yes || assumeYes) return "proceed";
+  if (isInteractive) return "confirm";
+  return "abort-agent";
 }
 
 // Entrega los archivos DEFAULT nuevos de member/ que el miembro aún NO tenga
@@ -1268,6 +1292,7 @@ function resolveBotDir(arg) {
 
 async function cmdUpdate(dirArg, flags) {
   const cfg = loadCfg(); if (cfg.lang && DICT[cfg.lang]) L = cfg.lang;
+  ASSUME_YES = !!(flags.yes || process.env.FORJA_YES);
   banner();
   const dir = resolveBotDir(dirArg);
   if (!dir) { console.log("  " + C.red(t().noBotHere) + "\n"); process.exit(1); }
@@ -1308,21 +1333,28 @@ async function cmdUpdate(dirArg, flags) {
   const { buf, version } = await download(bot.slug, key);
   console.log(C.green("✓") + C.dim(` ${(buf.length / 1024).toFixed(0)} KB`));
 
-  // Detección de ediciones al motor ANTES de pisar nada. null = sin manifest
-  // (primera vez con esta versión del CLI) → solo nota; lista no vacía → avisar
-  // y pedir consentimiento (humano: confirm en terminal; agente: briefing + --yes).
+  // Detección de ediciones al motor ANTES de pisar nada.
+  // null = sin manifest (instalación vieja / restore de backup) → NO seguir
+  //   en silencio: pedir y/N, o abortar con briefing si lo corre un agente.
+  // lista no vacía → mismo consentimiento (INH-10: el "no pude verificar"
+  //   era solo una nota y extractOver pisaba src/ igual).
   const mods = detectLocalMods(dir);
-  if (mods === null) {
-    console.log(C.dim("  " + t().updModsFirstTime));
+  const unverified = mods === null;
+  if (unverified) {
+    console.log("\n  " + C.yellow(t().updModsUnverified));
+    console.log("  " + C.dim(t().updModsUnverifiedExplain));
   } else if (mods.length > 0) {
     console.log("\n  " + C.yellow(t().updModsFound(mods.length)));
     const shown = mods.slice(0, 15);
     for (const f of shown) console.log(C.dim("    · ") + f);
     if (mods.length > shown.length) console.log(C.dim(`    … +${mods.length - shown.length}`));
     console.log("  " + C.dim(t().updModsExplain));
-    if (flags.yes || ASSUME_YES) {
+  }
+  if (engineOverwriteRisk(mods)) {
+    const gate = riskyUpdateGate(flags);
+    if (gate === "proceed") {
       console.log(C.dim("  " + t().updModsProceed));
-    } else if (interactive()) {
+    } else if (gate === "confirm") {
       const rl = createInterface({ input, output });
       const ans = (await rl.question("  " + t().updModsConfirm)).trim().toLowerCase();
       rl.close();
@@ -1331,9 +1363,9 @@ async function cmdUpdate(dirArg, flags) {
         return;
       }
     } else {
-      // Lo corre un agente sin --yes: NO destruir en silencio — briefing y fuera.
+      // Agente/CI sin --yes: NO destruir en silencio y NO colgarse en un prompt.
       agentBriefing(
-        [t().updModsAgentAsk],
+        [unverified ? t().updModsUnverifiedAgentAsk : t().updModsAgentAsk],
         "npx forjabot update --yes   " + t().updModsAgentRetry,
       );
       process.exit(1);
@@ -1345,7 +1377,7 @@ async function cmdUpdate(dirArg, flags) {
   ensureMemberDefaults(buf, dir); // entrega defaults nuevos de member/ sin pisar los del miembro
   writeManifest(buf, dir, version); // nueva baseline para el siguiente update
   console.log(C.green(`\n  ✓ ${t().updDone(version)}\n`));
-  if (mods && mods.length > 0 && backupPath)
+  if (engineOverwriteRisk(mods) && backupPath)
     console.log("  " + C.yellow(t().updModsReapply(backupPath.slice(dir.length + 1))));
   if (backupPath) console.log("  " + C.dim(t().updBackup(backupPath.slice(dir.length + 1))));
   console.log("  " + C.dim(t().updPreserved));
@@ -2271,4 +2303,4 @@ if (IS_MAIN) {
 }
 
 // Exports para pruebas (no afectan el uso como CLI).
-export { renderMemberConfig, stampBrandAndBrain, writeStarterConfig, select, forgeSplash, installAgentSkill, parseFlags, starterOnboarding, loadCreds, saveCreds, normalizeWorkerUrl, listenLoopback, stampBotConfig, applyBusinessFlags, writeManifest, detectLocalMods, preservedByUpdate };
+export { renderMemberConfig, stampBrandAndBrain, writeStarterConfig, select, forgeSplash, installAgentSkill, parseFlags, starterOnboarding, loadCreds, saveCreds, normalizeWorkerUrl, listenLoopback, stampBotConfig, applyBusinessFlags, writeManifest, detectLocalMods, preservedByUpdate, engineOverwriteRisk, riskyUpdateGate };
