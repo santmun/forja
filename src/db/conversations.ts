@@ -70,6 +70,40 @@ export class ConversationsRepo {
     );
   }
 
+  /**
+   * Borra una conversación y todo lo que le pertenece.
+   *
+   * Se borra tabla por tabla en vez de confiar en el ON DELETE CASCADE del
+   * esquema: la aplicación de llaves foráneas depende del motor, y si no está
+   * activa quedan filas huérfanas que nadie vuelve a ver pero siguen contando
+   * en las estadísticas. Además `leads` y `tickets` son ON DELETE SET NULL, así
+   * que la cascada no los limpiaría de todos modos.
+   *
+   * QUÉ SE VA: los mensajes, los insights, los hechos del cliente, los envíos
+   * de seguimiento y los TICKETS de esa conversación (son artefactos suyos, no
+   * tienen sentido sin ella).
+   *
+   * QUÉ SE QUEDA: los LEADS. Un lead es un contacto capturado, un activo del
+   * negocio — borrar una conversación no debería hacerlo desaparecer de la
+   * lista de Leads sin avisar. Se les deja el vínculo en NULL.
+   */
+  async delete(id: string): Promise<void> {
+    // Primero lo que cuelga, después la conversación.
+    for (const sql of [
+      "DELETE FROM messages WHERE conversation_id = ?",
+      "DELETE FROM conversation_insights WHERE conversation_id = ?",
+      "DELETE FROM customer_facts WHERE conversation_id = ?",
+      "DELETE FROM followup_sends WHERE conversation_id = ?",
+      "DELETE FROM tickets WHERE conversation_id = ?",
+      "UPDATE leads SET conversation_id = NULL WHERE conversation_id = ?",
+      "DELETE FROM conversations WHERE id = ?",
+    ]) {
+      // Una tabla que no exista en una instalación vieja no debe frenar el
+      // borrado de las demás.
+      await this.db.run(sql, [id]).catch(() => {});
+    }
+  }
+
   async setOpenTicket(id: string, ticketId: string | null): Promise<void> {
     await this.db.run(
       "UPDATE conversations SET open_ticket_id = ? WHERE id = ?",
