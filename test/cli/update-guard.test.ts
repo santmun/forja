@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from "node:fs";
-import { join } from "node:path";
+import path, { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -13,7 +13,7 @@ import {
   riskyUpdateGate,
 } from "../../cli/bin/cli.js";
 
-const CLI_SRC = fileURLToPath(new URL("../../cli/bin/cli.js", import.meta.url));
+const CLI_SRC = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../cli/bin/cli.js");
 
 function sha(s: string) {
   return createHash("sha256").update(s).digest("hex");
