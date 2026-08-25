@@ -12,6 +12,7 @@ import type { Env } from "../../env";
 import { isPro, PRO_ONLY_TABS } from "../../config";
 import { getNiche } from "../../niches";
 import type { NichePack } from "../../niches";
+import { temaClaro } from "./temaClaro";
 
 const UPGRADE_URL = "/admin/upgrade";
 
@@ -330,6 +331,7 @@ export function layout(opts: { title: string; activeTab: string; body: string; e
   <title>${opts.title}</title>
   ${HEAD_ASSETS}
   ${GLOBAL_STYLE}
+  ${temaClaro(opts.env)}
 </head>
 <body class="scanlines">
   <div class="shell">
