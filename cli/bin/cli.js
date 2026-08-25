@@ -23,7 +23,7 @@ import { stdin as input, stdout as output } from "node:process";
 import { mkdirSync, writeFileSync, readFileSync, rmSync, readdirSync, existsSync, statSync, realpathSync, chmodSync } from "node:fs";
 import { createServer } from "node:http";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { join, relative, dirname } from "node:path";
 import { execFileSync } from "node:child_process";
 import { randomUUID, createHash } from "node:crypto";
 import { fileURLToPath } from "node:url";
@@ -110,6 +110,8 @@ const DICT = {
     updModsAgentRetry: "(con su sí; tras actualizar, compara .forja-backups/ vs el motor nuevo y re-aplica sus personalizaciones)",
     updModsReapply: (p) => `⚠ Tus personalizaciones del motor quedaron en ${p} — compáralo contra el código nuevo y re-aplícalas antes de desplegar.`,
     updBackup: (p) => `Respaldé tu versión anterior en ${p} — por si quieres recuperar algo.`,
+    updBackupFailed: "No pude crear el respaldo. Por seguridad no actualicé nada (así no se pierde tu código).",
+    updBackupFailedHint: "Prueba el mismo comando desde PowerShell o cmd.exe. Si sigue fallando, avísanos en la comunidad.",
     updPreserved: "Se conservaron: tu configuración, tu base de conocimiento, tu wrangler.toml y lo que ajustaste en el panel o con /prompt.",
     updReplaced: "Se actualizó: el motor del bot (todo lo demás).",
     updGolden: "Recuerda: los cambios de comportamiento van en /prompt o tu config, NO en el código — así sobreviven a todos los updates.",
@@ -232,6 +234,8 @@ const DICT = {
     updModsAgentRetry: "(with their yes; after updating, diff .forja-backups/ vs the new engine and re-apply their customizations)",
     updModsReapply: (p) => `⚠ Your engine customizations were saved to ${p} — diff it against the new code and re-apply them before deploying.`,
     updBackup: (p) => `Backed up your previous version to ${p} — in case you want to recover anything.`,
+    updBackupFailed: "I couldn't create the backup. For safety I didn't update anything (so your code stays intact).",
+    updBackupFailedHint: "Try the same command from PowerShell or cmd.exe. If it still fails, tell us in the community.",
     updPreserved: "Preserved: your configuration, your knowledge base, your wrangler.toml, and anything you set in the panel or with /prompt.",
     updReplaced: "Updated: the bot's engine (everything else).",
     updGolden: "Remember: behavior changes go in /prompt or your config, NOT in the code — that way they survive every update.",
@@ -610,12 +614,109 @@ function stampBotConfig(dir, plan, slug) {
   s = s.replace(/bucket_name\s*=\s*"horizontes-bot-catalog[^"]*"/, `bucket_name = "horizontes-bot-catalog"`);
   writeFileSync(wt, s);
 }
+// ── tar seguro en Windows/Git Bash (INH-11) ──────────────────────────────────
+// GNU tar (Git-for-Windows/MSYS) trata `C:` en el nombre del archivo como host
+// remoto estilo rsync/ssh (`user@host:path`) → "Cannot connect to C: resolve
+// failed". El bsdtar de PowerShell/cmd no. Contrato: el operando de -f NUNCA
+// debe ser un nombre que GNU tar tome como remoto. Normalizamos a ruta
+// relativa con prefijo `./` y, si el binario es GNU tar, pasamos
+// `--force-local`. BSD tar (macOS) y el tar de Windows rechazan ese flag, así
+// que solo se agrega cuando `tar --version` dice "GNU tar".
+
+function gnuTarTreatsAsRemote(name) {
+  if (typeof name !== "string" || name === "") return false;
+  // GNU tar: si empieza con '/' o '.' es local, aunque tenga ':'.
+  if (name.charAt(0) === "/" || name.charAt(0) === ".") return false;
+  return name.includes(":");
+}
+
+function prefixDotSlash(rel) {
+  const s = String(rel).replace(/\\/g, "/");
+  if (s === "." || s === "..") return s;
+  if (s.startsWith("./") || s.startsWith("../")) return s;
+  return "./" + s;
+}
+
+/** Relativo win→win (también en tests Linux con strings `C:\...`). Misma unidad o null. */
+function windowsRelative(fromDir, p) {
+  const fromWin = String(fromDir).match(/^([A-Za-z]):[\\/](.*)$/);
+  const pWin = String(p).match(/^([A-Za-z]):[\\/](.*)$/);
+  if (!fromWin || !pWin) return null;
+  if (fromWin[1].toLowerCase() !== pWin[1].toLowerCase()) return null;
+  const fromParts = fromWin[2].split(/[\\/]/).filter(Boolean);
+  const pParts = pWin[2].split(/[\\/]/).filter(Boolean);
+  let i = 0;
+  while (i < fromParts.length && i < pParts.length && fromParts[i].toLowerCase() === pParts[i].toLowerCase()) i++;
+  return [...Array(fromParts.length - i).fill(".."), ...pParts.slice(i)].join("/") || ".";
+}
+
+function tarLocalPath(p, fromDir = process.cwd()) {
+  if (typeof p !== "string" || p === "") return p;
+  const winRel = windowsRelative(fromDir, p);
+  if (winRel != null) return prefixDotSlash(winRel);
+  // Ya es relativa y GNU tar no la toma como remota: solo unifica slashes + `./`.
+  if (!gnuTarTreatsAsRemote(p) && !p.startsWith("/") && !/^[A-Za-z]:/.test(p)) {
+    return prefixDotSlash(p);
+  }
+  try {
+    const rel = relative(fromDir, p);
+    if (rel !== "" && !gnuTarTreatsAsRemote(rel) && !/^[A-Za-z]:/.test(rel)) {
+      return prefixDotSlash(rel);
+    }
+  } catch { /* fromDir/p incompatibles entre plataformas */ }
+  if (!gnuTarTreatsAsRemote(p)) return String(p).replace(/\\/g, "/");
+  return "./" + String(p).replace(/\\/g, "/");
+}
+
+function buildTarArchiveArgv({ op, file, extra = [], forceLocal = false, fromDir }) {
+  const local = tarLocalPath(file, fromDir ?? process.cwd());
+  const argv = [];
+  if (forceLocal) argv.push("--force-local");
+  argv.push(op, local, ...extra);
+  return argv;
+}
+
+let _tarIsGnu;
+function isGnuTar() {
+  if (_tarIsGnu !== undefined) return _tarIsGnu;
+  try {
+    const out = execFileSync("tar", ["--version"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 5000,
+    });
+    _tarIsGnu = /GNU tar/i.test(out);
+  } catch {
+    _tarIsGnu = false;
+  }
+  return _tarIsGnu;
+}
+
+function execTarArchive(op, archivePath, extra = [], execOpts = {}) {
+  const fromDir = execOpts.cwd || dirname(archivePath);
+  const argv = buildTarArchiveArgv({
+    op,
+    file: archivePath,
+    extra,
+    fromDir,
+    forceLocal: isGnuTar(),
+  });
+  return execFileSync("tar", argv, { ...execOpts, cwd: fromDir });
+}
+
+/** Fail-closed: sin respaldo usable no se pisa src/ (INH-11). */
+function backupIsUsable(backupPath) {
+  if (typeof backupPath !== "string" || !backupPath) return false;
+  try { return existsSync(backupPath) && statSync(backupPath).size > 0; }
+  catch { return false; }
+}
+
 function extractFresh(buf, slug, version) {
   const dir = join(process.cwd(), slug);
   mkdirSync(dir, { recursive: true });
   const tgz = join(dir, ".artifact.tgz");
   writeFileSync(tgz, buf);
-  execFileSync("tar", ["-xzf", tgz, "-C", dir]);
+  execTarArchive("-xzf", tgz, [], { cwd: dir });
   rmSync(tgz, { force: true });
   writeMarker(dir, slug, version);
   writeManifest(buf, dir, version); // baseline para detectar ediciones al motor en updates
@@ -628,11 +729,12 @@ function extractFresh(buf, slug, version) {
 function extractOver(buf, dir, slug, version) {
   const tgz = join(dir, ".artifact.tgz");
   writeFileSync(tgz, buf);
-  execFileSync("tar", ["-xzf", tgz, "-C", dir,
+  execTarArchive("-xzf", tgz, [
     "--exclude=./member/*.local.ts", "--exclude=./member/kb", "--exclude=./wrangler.toml",
     "--exclude=./.dev.vars", "--exclude=./.dev.vars.*", "--exclude=./.env", "--exclude=./.env.*",
     "--exclude=./.bot-state.json", "--exclude=./.bot-setup.json", `--exclude=./${MARKER}`,
-    "--exclude=./.forja-manifest.json"]);
+    "--exclude=./.forja-manifest.json",
+  ], { cwd: dir });
   rmSync(tgz, { force: true });
   writeMarker(dir, slug, version);
 }
@@ -640,26 +742,30 @@ function extractOver(buf, dir, slug, version) {
 // P0 — respaldo automático ANTES de traer el motor nuevo: snapshot .tgz de la carpeta
 // del bot para que el miembro nunca pierda ediciones (aunque las haya hecho en el
 // código del motor, no solo en member/). Es tar (no git): funciona en Mac/Linux/Windows
-// sin setup ni auth. Nunca bloquea el update: si algo falla, devuelve null y seguimos.
+// sin setup ni auth. Si no se puede escribir el respaldo, devolvemos null — el update
+// DEBE abortar (fail-closed) antes de extractOver: un backup fallido + extract es
+// cómo un usuario de Windows puede perder src/ (INH-11).
 function backupBeforeUpdate(dir, fromVer) {
   const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19); // 2026-08-15T14-30-05
   const backDir = join(dir, ".forja-backups");
   const dest = join(backDir, `${stamp}_v${fromVer}.tgz`);
   try {
     mkdirSync(backDir, { recursive: true });
-    // -C dir + "." archiva todo; los --exclude evitan node_modules, el propio backup y git.
-    execFileSync("tar", ["-czf", dest, "-C", dir,
+    // cwd=dir + "." archiva todo; los --exclude evitan node_modules, el propio backup y git.
+    execTarArchive("-czf", dest, [
       "--exclude=./node_modules", "--exclude=./.forja-backups",
       "--exclude=./.git", "--exclude=./.wrangler",
       // NO archivar secretos: el update nunca los pisa, así que no hay nada que respaldar,
       // y así el .tgz jamás contiene llaves (importante si algún día se sube a GitHub).
       "--exclude=./.dev.vars", "--exclude=./.dev.vars.*",
-      "--exclude=./.env", "--exclude=./.env.*", "."]);
+      "--exclude=./.env", "--exclude=./.env.*", ".",
+    ], { cwd: dir });
     // Hygiene: conserva solo los 5 respaldos más recientes (stamp ISO ⇒ orden lexical = cronológico).
     try {
       const olds = readdirSync(backDir).filter((f) => f.endsWith(".tgz")).sort();
       for (const f of olds.slice(0, -5)) rmSync(join(backDir, f), { force: true });
     } catch { /* pruning best-effort */ }
+    if (!backupIsUsable(dest)) return null;
     return dest;
   } catch { return null; }
 }
@@ -695,7 +801,7 @@ function artifactEntries(buf, dir) {
   const tgz = join(dir, ".artifact-ls.tgz");
   writeFileSync(tgz, buf);
   try {
-    const out = execFileSync("tar", ["-tzf", tgz], { encoding: "utf8" });
+    const out = execTarArchive("-tzf", tgz, [], { cwd: dir, encoding: "utf8" });
     return out.split("\n")
       .map((l) => l.trim().replace(/^\.\//, ""))
       .filter((l) => l && !l.endsWith("/"));
@@ -765,7 +871,7 @@ function ensureMemberDefaults(buf, dir) {
     // garantiza), así que no hay nada que pisar. NADA de --skip-old-files: es un
     // flag solo-GNU y el tar de macOS (BSD) lo rechaza → el update fallaba callado
     // en Mac y el stub nunca se creaba (reportado por Pedro/PeeterDigital).
-    execFileSync("tar", ["-xzf", tgz, "-C", dir, ...missing]);
+    execTarArchive("-xzf", tgz, missing, { cwd: dir });
   } catch { /* si el tarball no lo trae (artifact viejo), no rompemos el update */ }
   rmSync(tgz, { force: true });
 }
@@ -1373,6 +1479,12 @@ async function cmdUpdate(dirArg, flags) {
   }
 
   const backupPath = backupBeforeUpdate(dir, marker.version);  // P0: respaldo ANTES de sobrescribir
+  if (!backupIsUsable(backupPath)) {
+    console.log("\n  " + C.red("✗ " + t().updBackupFailed));
+    console.log("  " + C.dim(t().updBackupFailedHint));
+    console.log(C.dim("  " + supportLine() + "\n"));
+    process.exit(1);
+  }
   extractOver(buf, dir, bot.slug, version);
   ensureMemberDefaults(buf, dir); // entrega defaults nuevos de member/ sin pisar los del miembro
   writeManifest(buf, dir, version); // nueva baseline para el siguiente update
@@ -2303,4 +2415,4 @@ if (IS_MAIN) {
 }
 
 // Exports para pruebas (no afectan el uso como CLI).
-export { renderMemberConfig, stampBrandAndBrain, writeStarterConfig, select, forgeSplash, installAgentSkill, parseFlags, starterOnboarding, loadCreds, saveCreds, normalizeWorkerUrl, listenLoopback, stampBotConfig, applyBusinessFlags, writeManifest, detectLocalMods, preservedByUpdate, engineOverwriteRisk, riskyUpdateGate };
+export { renderMemberConfig, stampBrandAndBrain, writeStarterConfig, select, forgeSplash, installAgentSkill, parseFlags, starterOnboarding, loadCreds, saveCreds, normalizeWorkerUrl, listenLoopback, stampBotConfig, applyBusinessFlags, writeManifest, detectLocalMods, preservedByUpdate, engineOverwriteRisk, riskyUpdateGate, gnuTarTreatsAsRemote, tarLocalPath, buildTarArchiveArgv, execTarArchive, backupIsUsable, backupBeforeUpdate };
