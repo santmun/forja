@@ -1,4 +1,3 @@
-// @ts-nocheck — el CLI publicado es un JS sin .d.ts; el contrato se afirma en runtime.
 import { describe, it, expect } from "vitest";
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -155,8 +154,8 @@ describe("buildTarArchiveArgv — path-normalization / force-local contract", ()
 
 describe("backupIsUsable (fail-closed before extractOver)", () => {
   it("rejects null/empty/missing so update must abort", () => {
-    expect(backupIsUsable(null as unknown as string)).toBe(false);
-    expect(backupIsUsable(undefined as unknown as string)).toBe(false);
+    expect(backupIsUsable(null)).toBe(false);
+    expect(backupIsUsable(undefined)).toBe(false);
     expect(backupIsUsable("")).toBe(false);
     expect(backupIsUsable("/definitely/not/a/backup.tgz")).toBe(false);
   });

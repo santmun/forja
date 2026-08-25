@@ -23,5 +23,5 @@ export function execTarArchive(
   extra?: string[],
   execOpts?: { cwd?: string; encoding?: string },
 ): string | Buffer;
-export function backupIsUsable(backupPath: string): boolean;
+export function backupIsUsable(backupPath: string | null | undefined): boolean;
 export function backupBeforeUpdate(dir: string, fromVer: string): string | null;
