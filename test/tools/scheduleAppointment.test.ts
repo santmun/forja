@@ -1,5 +1,10 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { scheduleAppointmentTool } from "../../src/tools/scheduleAppointment";
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 // El tool ya no recibe eventTypeId del modelo: se resuelve del env
 // (CALCOM_EVENT_TYPE_ID / CALCOM_EVENT_TYPES) y llama Cal.com API v2.
@@ -84,6 +89,58 @@ describe("scheduleAppointmentTool", () => {
     )) as { error: string };
     expect(result.error).toBe("calcom_not_configured");
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it("resuelve 'el próximo martes' en Europe/Madrid al martes 2026-09-01", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T15:00:00.000Z"));
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ data: { "2026-09-01": [{ start: "2026-09-01T10:00:00+02:00" }] } }),
+          { status: 200 },
+        ),
+    );
+    global.fetch = fetchMock as any;
+    const env = { ...baseEnv, CALCOM_TIMEZONE: "Europe/Madrid", BOT_LANGUAGE: "es" };
+    const tool = scheduleAppointmentTool(env, () => "conv_x");
+    const result = (await tool.execute!({ date: "el próximo martes a las 10" }, {} as any)) as {
+      date: string;
+      weekday: string;
+      slots: string[];
+    };
+    expect(result.date).toBe("2026-09-01");
+    expect(result.weekday).toBe("martes");
+    expect(result.slots[0]).toContain("2026-09-01");
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toContain("start=2026-09-01");
+  });
+
+  it("un ISO mal contado no pisa las palabras del cliente al reservar", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T15:00:00.000Z"));
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ data: { id: 99, status: "accepted" } }), { status: 201 }),
+    );
+    global.fetch = fetchMock as any;
+    const env = { ...baseEnv, CALCOM_TIMEZONE: "Europe/Madrid" };
+    const tool = scheduleAppointmentTool(env, () => "conv_x");
+    const result = (await tool.execute!(
+      {
+        date: "el próximo martes 2026-09-02",
+        startTime: "2026-09-02T10:00:00+02:00",
+        attendeeName: "Ana",
+        attendeeEmail: "ana@x.com",
+      },
+      {} as any,
+    )) as { booked: boolean; start: string; weekday: string; date: string };
+    expect(result.booked).toBe(true);
+    expect(result.date).toBe("2026-09-01");
+    expect(result.weekday).toBe("martes");
+    expect(result.start).toBe("2026-09-01T10:00:00+02:00");
+    const body = JSON.parse(String((fetchMock.mock.calls[0] as unknown as [string, RequestInit])[1].body));
+    expect(body.start).toBe("2026-09-01T10:00:00+02:00");
   });
 
   it("returns calcom_not_configured when no event type is configured", async () => {

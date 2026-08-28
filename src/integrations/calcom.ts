@@ -1,4 +1,5 @@
 import type { Env } from "../env";
+import { businessTimeZone, DEFAULT_TZ, todayInTz } from "../time/resolveDate";
 
 // Cliente de Cal.com API v2 para los nichos de cita. Dos capacidades:
 //  - getAvailableSlots: horarios reales libres de un event type en un día.
@@ -10,7 +11,7 @@ const CALCOM_API = "https://api.cal.com/v2";
 const SLOTS_VERSION = "2024-09-04";
 const BOOKINGS_VERSION = "2026-02-25";
 
-export const DEFAULT_TZ = "America/Mexico_City";
+export { DEFAULT_TZ, todayInTz };
 
 /** ¿El dueño ya conectó Cal.com? (API key + al menos un event type). */
 export function calcomConfigured(env: Env): boolean {
@@ -18,17 +19,7 @@ export function calcomConfigured(env: Env): boolean {
 }
 
 export function calcomTimeZone(env: Env): string {
-  return (env.CALCOM_TIMEZONE || "").trim() || DEFAULT_TZ;
-}
-
-/** YYYY-MM-DD de hoy en la zona dada (en-CA formatea ISO). */
-export function todayInTz(timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(new Date());
+  return businessTimeZone(env);
 }
 
 /**
