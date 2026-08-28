@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { businessTimeZone } from "./time/resolveDate";
 
 export interface SystemPromptInput {
   botName: string;
@@ -150,8 +151,11 @@ ${instructions}
   const contextoTemporal = input.today
     ? `<contexto_temporal>
 Hoy es ${input.today}. Tu conocimiento de entrenamiento tiene OTRA fecha — ignórala.
-Usa SIEMPRE esta fecha real para interpretar "hoy", "mañana", "el viernes", etc.,
-y para toda fecha que pases a las tools (citas, horarios).
+Usa SIEMPRE esta fecha real para hablar de "hoy" o "mañana" con el cliente.
+Cuando llames una tool de citas/horarios con una fecha relativa ("el viernes",
+"el próximo martes", "mañana"), pasa las PALABRAS del cliente, no un YYYY-MM-DD
+que hayas calculado tú. El sistema resuelve la fecha exacta y el día de la semana.
+Solo manda YYYY-MM-DD si el cliente dio una fecha de calendario (día y mes).
 </contexto_temporal>`
     : "";
 
@@ -213,6 +217,6 @@ export function systemPromptFromEnv(
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
     customInstructions: overrides?.customInstructions,
-    today: currentDateLine((env.CALCOM_TIMEZONE || "").trim() || "America/Mexico_City"),
+    today: currentDateLine(businessTimeZone(env)),
   });
 }
