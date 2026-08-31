@@ -363,9 +363,9 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
 
     expect(generateTextMock).toHaveBeenCalledTimes(1);
     expect(sendReply).toHaveBeenCalled();
-    const chunks = sendReply.mock.calls[0][0].chunks;
-    expect(chunks.join("")).toContain("Hola, ¿en qué te ayudo?");
-    expect(chunks.join("")).not.toMatch(/Algo falló de mi lado/);
+    const sent = sendReply.mock.calls.at(0)?.at(0) as { chunks: string[] } | undefined;
+    expect(sent?.chunks.join("")).toContain("Hola, ¿en qué te ayudo?");
+    expect(sent?.chunks.join("")).not.toMatch(/Algo falló de mi lado/);
   });
 });
 
