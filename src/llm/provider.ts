@@ -139,7 +139,19 @@ export function createModel(env: Env, tier: Tier, ov?: LlmOverrides): ResolvedMo
 
   if (provider === "openai") {
     const openai = createOpenAI({ apiKey });
-    return { provider, modelId, model: openai(modelId), supportsPromptCache: false };
+    // Chat Completions (`openai.chat`), NO la Responses API que es el default
+    // de `openai(modelId)` desde AI SDK 5. Responses trata las function tools
+    // como JSON Schema strict si `strict` se omite; nuestras tools (y las de
+    // giros Forja+ como coach: agendarCita/cancelarCita) usan muchos
+    // `.optional()` / `.default()` y OpenAI responde 400 Bad Request → el bot
+    // contesta "Algo falló de mi lado...". El mismo payload por Chat Completions
+    // (lo que se prueba con curl) acepta parámetros opcionales.
+    // `.chat` existe en @ai-sdk/openai v3 y v4; el fallback cubre mocks viejos.
+    const model =
+      typeof (openai as any).chat === "function"
+        ? (openai as any).chat(modelId)
+        : openai(modelId);
+    return { provider, modelId, model, supportsPromptCache: false };
   }
 
   if (provider === "xai") {
