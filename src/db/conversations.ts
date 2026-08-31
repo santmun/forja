@@ -16,6 +16,13 @@ function makeConvId(channel: string, channelUserId: string): string {
   return `${channel}:${channelUserId}`;
 }
 
+/**
+ * Owner-takeover window: 20 minutes from the last owner message.
+ * Later owner messages slide the window forward; silence past the cap
+ * lets the bot resume. Not unbounded — echoes cannot stack hours of pause.
+ */
+export const OWNER_TAKEOVER_MS = 20 * 60 * 1000;
+
 export class ConversationsRepo {
   constructor(private readonly db: Db) {}
 

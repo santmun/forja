@@ -65,6 +65,8 @@ interface HandoffNotice {
   reason: string;
   summary: string;
   ticketId: string;
+  /** Override Telegram copy. Default is the ticket template. */
+  text?: string;
 }
 
 /**
@@ -95,6 +97,9 @@ export function handoffNotifyStatus(env: Env): { ok: boolean; channels: string[]
  */
 export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void> {
   const ticketUrl = `${env.DASHBOARD_BASE_URL}/admin/tickets`;
+  const telegramText =
+    notice.text ??
+    `🚨 Nuevo ticket [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`;
 
   // El SID de la plantilla puede venir del secret O del setting que escribe el
   // setup del panel. Se resuelve ANTES del guard: si vive solo en settings, el
@@ -134,8 +139,7 @@ export async function notifyOwner(env: Env, notice: HandoffNotice): Promise<void
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             chat_id: env.OWNER_TELEGRAM_CHAT_ID,
-            text:
-              `🚨 Nuevo ticket [${notice.reason}]\n${notice.summary}\n\nVer: ${ticketUrl}`,
+            text: telegramText,
           }),
         },
       );

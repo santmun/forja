@@ -49,7 +49,7 @@ import { sendCampaign, createHandoffTemplate, contentApprovalStatus } from "../c
 import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
-import { ConversationsRepo } from "../db/conversations";
+import { ConversationsRepo, OWNER_TAKEOVER_MS } from "../db/conversations";
 import { MessagesRepo } from "../db/messages";
 import { SettingsRepo, SETTING_KEYS, type SettingKey } from "../db/settings";
 import { CONTROLS, levelToValue } from "./control-levels";
@@ -544,14 +544,12 @@ adminApp.post("/tickets/:id/resolve", async (c) => {
 
 // --- Inbox actions (F1) -------------------------------------------------------
 
-/** Owner takes over for this long after replying/pausing from the dashboard. */
-const TAKEOVER_MS = 60 * 60 * 1000;
-
 // Reply AS A HUMAN from the dashboard: sends through the conversation's channel
 // adapter (Twilio/Telegram/Meta/ManyChat), persists the message as role=owner,
-// and pauses the bot (owner takeover — same behavior as isOwnerMessage in the
-// agent). Returns a status line for #send-status plus an out-of-band swap that
-// refreshes #thread-live instantly. X-Sent: 1 tells the composer to reset.
+// and pauses the bot (owner takeover — same 20-min sliding window as
+// isOwnerMessage in the agent). Returns a status line for #send-status plus
+// an out-of-band swap that refreshes #thread-live instantly. X-Sent: 1 tells
+// the composer to reset.
 adminApp.post("/conversations/:id/reply", async (c) => {
   const id = c.req.param("id");
   const form = await c.req.formData().catch(() => null);
@@ -583,7 +581,7 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   const msgs = new MessagesRepo(db);
   await msgs.append(id, "owner", text);
   await convs.touchLastMessage(id);
-  await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
+  await convs.setPausedUntil(id, Date.now() + OWNER_TAKEOVER_MS);
 
   c.header("X-Sent", "1");
   return c.html(
@@ -597,7 +595,7 @@ adminApp.post("/conversations/:id/reply", async (c) => {
 adminApp.post("/conversations/:id/pause", async (c) => {
   const id = c.req.param("id");
   const convs = new ConversationsRepo(new Db(c.env.DB));
-  await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
+  await convs.setPausedUntil(id, Date.now() + OWNER_TAKEOVER_MS);
   return c.html(await renderThreadLive(c.env, id));
 });
 
