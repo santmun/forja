@@ -6,7 +6,12 @@ vi.mock("@ai-sdk/anthropic", () => ({
   createAnthropic: () => (modelId: string) => ({ p: "anthropic", modelId }),
 }));
 vi.mock("@ai-sdk/openai", () => ({
-  createOpenAI: () => (modelId: string) => ({ p: "openai", modelId }),
+  createOpenAI: () => {
+    const chat = (modelId: string) => ({ p: "openai", modelId, api: "chat" });
+    const fn = (modelId: string) => ({ p: "openai", modelId, api: "responses" });
+    (fn as any).chat = chat;
+    return fn;
+  },
 }));
 
 import { resolveProvider, modelIdFor, createModel } from "../../src/llm/provider";
@@ -58,5 +63,9 @@ describe("createModel", () => {
     expect(r.provider).toBe("openai");
     expect(r.supportsPromptCache).toBe(false);
     expect(r.modelId).toBe("gpt-4o");
+  });
+  it("usa Chat Completions (openai.chat), no la Responses API default", () => {
+    const r = createModel(env({ LLM_PROVIDER: "openai", OPENAI_API_KEY: "sk-oa" }), "smart");
+    expect(r.model).toEqual({ p: "openai", modelId: "gpt-4o", api: "chat" });
   });
 });
