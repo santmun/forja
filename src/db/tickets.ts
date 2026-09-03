@@ -19,6 +19,14 @@ export interface CreateTicketInput {
   transcript: string;
 }
 
+/** Idempotent. No semicolons inside — schema.sql splitter is `;`. */
+export const CLEANUP_STALE_OPEN_TICKETS_SQL = `
+UPDATE conversations SET open_ticket_id = NULL
+WHERE open_ticket_id IS NOT NULL
+  AND (open_ticket_id NOT IN (SELECT id FROM tickets)
+       OR open_ticket_id IN (SELECT id FROM tickets WHERE status = 'resolved'))
+`.trim();
+
 export class TicketsRepo {
   constructor(private readonly db: Db) {}
 
@@ -47,5 +55,20 @@ export class TicketsRepo {
       "UPDATE tickets SET status = 'resolved', resolved_at = ?, resolved_by = ? WHERE id = ?",
       [Date.now(), resolvedBy, id],
     );
+    // Conversation ids are permanent (channel:user). open_ticket_id must drop
+    // when the human case closes, or Pro follow-ups / surveys skip that lead forever.
+    await this.db.run(
+      "UPDATE conversations SET open_ticket_id = NULL WHERE open_ticket_id = ?",
+      [id],
+    );
+  }
+
+  /**
+   * One-shot cleanup for rows still pointing at a resolved ticket or a missing
+   * ticket id (orphans). Safe to re-run. Same statement lives in schema.sql
+   * so `pnpm db:apply:remote` heals existing bots on update.
+   */
+  async cleanupStaleOpenTicketRefs(): Promise<void> {
+    await this.db.run(CLEANUP_STALE_OPEN_TICKETS_SQL);
   }
 }

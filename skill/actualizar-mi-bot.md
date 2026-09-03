@@ -166,6 +166,8 @@ Si la versión nueva trae cambios en el esquema de la base (`src/db/schema.sql` 
 git diff HEAD@{1} HEAD --name-only | grep "src/db/schema.sql" && pnpm db:apply:remote
 ```
 Esto **agrega** columnas/tablas nuevas. No borra los datos existentes (conversaciones, leads).
+Si el esquema trae el `UPDATE` de `open_ticket_id`, también libera conversaciones
+cuyo ticket ya se resolvió o ya no existe — sin eso el follow-up las saltaba para siempre.
 
 ## Paso 8 — Publicar y sincronizar la base de conocimiento
 
