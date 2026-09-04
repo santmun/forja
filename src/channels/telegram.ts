@@ -1,5 +1,6 @@
 import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
 import type { Env } from "../env";
+import { toTelegramHtml, hasBalancedTags } from "../replies/format";
 
 const TG_API = "https://api.telegram.org/bot";
 
@@ -79,11 +80,46 @@ export const telegramAdapter: ChannelAdapter = {
       }).catch(() => {});
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
-      await fetch(`${TG_API}${token}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat_id: reply.channelUserId, text: reply.chunks[i] }),
-      });
+      // Sin parse_mode, Telegram muestra "**negrita**" literal en vez de
+      // renderizarla — el modelo escribe markdown, pero nadie lo traduce.
+      // Ojo: un parse_mode:"HTML" inválido no lanza, solo devuelve 400 — si
+      // no se revisa `res.ok`, el mensaje se pierde en silencio. Por eso:
+      // (1) valida el balanceo de tags ANTES de mandar (hasBalancedTags),
+      // (2) si Telegram igual lo rechaza, reintenta UNA vez en texto plano.
+      // El alumno/cliente nunca se queda sin respuesta por un HTML raro.
+      const html = toTelegramHtml(reply.chunks[i]);
+      const sendOnce = (body: Record<string, unknown>) =>
+        fetch(`${TG_API}${token}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+      let res: Response;
+      if (hasBalancedTags(html)) {
+        res = await sendOnce({ chat_id: reply.channelUserId, text: html, parse_mode: "HTML" });
+      } else {
+        console.error("[telegram] HTML sin balancear, se manda como texto plano", {
+          preview: html.slice(0, 120),
+        });
+        res = await sendOnce({ chat_id: reply.channelUserId, text: reply.chunks[i] });
+      }
+
+      if (!res.ok) {
+        const errBody = await res.text().catch(() => "");
+        console.error(
+          `[telegram] sendMessage falló (status ${res.status}) con HTML, reintentando en texto plano`,
+          errBody,
+        );
+        const retry = await sendOnce({ chat_id: reply.channelUserId, text: reply.chunks[i] });
+        if (!retry.ok) {
+          const retryErrBody = await retry.text().catch(() => "");
+          console.error(
+            `[telegram] sendMessage falló otra vez en texto plano (status ${retry.status})`,
+            retryErrBody,
+          );
+        }
+      }
     }
   },
 

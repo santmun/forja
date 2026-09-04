@@ -120,3 +120,49 @@ describe("resolveTelegramFileUrl", () => {
     expect(url).toBeNull();
   });
 });
+
+describe("telegramAdapter.sendReply", () => {
+  it("sends parse_mode HTML with markdown converted to tags", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+    await telegramAdapter.sendReply(
+      { channel: "telegram", channelUserId: "555", chunks: ["**Ojo:** te falta __la conclusión__."] },
+      env,
+    );
+
+    const sendMessageCall = fetchSpy.mock.calls.find(([url]) =>
+      String(url).includes("/sendMessage"),
+    );
+    expect(sendMessageCall).toBeDefined();
+    const body = JSON.parse(String(sendMessageCall![1]?.body));
+    expect(body.parse_mode).toBe("HTML");
+    expect(body.text).toBe("<b>Ojo:</b> te falta <u>la conclusión</u>.");
+  });
+
+  it("reintenta en texto plano si Telegram rechaza el HTML (400)", async () => {
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })) // typing
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ ok: false, description: "can't parse entities" }), {
+          status: 400,
+        }),
+      ) // sendMessage con HTML falla
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 })); // retry en texto plano
+
+    await telegramAdapter.sendReply(
+      { channel: "telegram", channelUserId: "555", chunks: ["**algo**"] },
+      env,
+    );
+
+    const sendMessageCalls = fetchSpy.mock.calls.filter(([url]) =>
+      String(url).includes("/sendMessage"),
+    );
+    expect(sendMessageCalls).toHaveLength(2);
+    const retryBody = JSON.parse(String(sendMessageCalls[1][1]?.body));
+    expect(retryBody.parse_mode).toBeUndefined();
+    expect(retryBody.text).toBe("**algo**");
+  });
+});
