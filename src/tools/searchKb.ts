@@ -24,7 +24,13 @@ export function searchKbTool(env: Env) {
         if (!Array.isArray(vec)) {
           return { error: "transient" as const, message: "embedding shape unexpected" };
         }
-        const matches = await env.KB.query(vec, { topK: 5 });
+        // returnMetadata defaults to "none" — without it Vectorize returns a
+        // correct score but title/content are ALWAYS empty. The model sees a
+        // "match" with a decent score but no actual text, and (correctly,
+        // per its anti-hallucination instructions) refuses to use it. This
+        // looks like a confidence-threshold problem but never is — the KB
+        // content just never made it back from Vectorize in the first place.
+        const matches = await env.KB.query(vec, { topK: 5, returnMetadata: "all" });
         const results: SearchKbResult[] = (matches.matches ?? []).map((m: any) => ({
           title: (m.metadata?.title as string) ?? "",
           content: (m.metadata?.content as string) ?? "",

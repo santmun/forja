@@ -18,6 +18,18 @@ describe("searchKbTool", () => {
     expect(result.results[0].score).toBe(0.91);
   });
 
+  it("requests returnMetadata — without it Vectorize returns a real score but empty title/content", async () => {
+    const query = vi.fn(async () => ({ matches: [] }));
+    const fakeEnv = {
+      AI: { run: vi.fn(async () => ({ data: [[0.1, 0.2, 0.3]] })) },
+      KB: { query },
+    } as any;
+    const tool = searchKbTool(fakeEnv);
+    const execute = tool.execute as (input: { query: string }) => Promise<any>;
+    await execute({ query: "como embebo wall" });
+    expect(query).toHaveBeenCalledWith([0.1, 0.2, 0.3], { topK: 5, returnMetadata: "all" });
+  });
+
   it("returns empty results when KB throws", async () => {
     const fakeEnv = {
       AI: { run: vi.fn(async () => ({ data: [[0.1, 0.2]] })) },
