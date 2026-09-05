@@ -12,6 +12,14 @@
  * middleware that has access to `c.env` rather than at module-init time.
  */
 import { parsePeerBots } from "./projects";
+import {
+  MAX_BYTES_AUDIO,
+  enviarNotaDeVoz,
+  formatoGrabable,
+  motivoEntendible,
+  telefonoDe,
+  tipoBase,
+} from "../media/notaDeVoz";
 import { Hono } from "hono";
 import { generateText } from "ai";
 import { createModel } from "../llm/provider";
@@ -588,6 +596,69 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   c.header("X-Sent", "1");
   return c.html(
     `<span class="text-emerald-600">✓ Enviado por ${escapeHtml(channelLabel(conv.channel))}</span>` +
+      `<div id="thread-live" hx-swap-oob="innerHTML">${await renderThreadLive(c.env, id)}</div>`,
+  );
+});
+
+/**
+ * NOTA DE VOZ: se graba en el panel, se manda por WhatsApp y el bot se pausa,
+ * igual que al responder por escrito. Si una persona del equipo acaba de
+ * hablarle con su voz, lo último que puede pasar es que el bot conteste encima.
+ *
+ * El orden importa: PRIMERO se envía. Si WhatsApp lo rechaza no se guarda nada
+ * ni se pausa nada, para que el hilo nunca muestre un audio que no llegó (misma
+ * regla que /reply).
+ */
+adminApp.post("/conversations/:id/audio", async (c) => {
+  const id = c.req.param("id");
+  const db = new Db(c.env.DB);
+  const convs = new ConversationsRepo(db);
+  const conv = await convs.getById(id);
+  if (!conv) return c.html(`<span class="text-red-600">✗ Conversación no encontrada.</span>`);
+
+  const form = await c.req.formData().catch(() => null);
+  // Se comprueba por forma, no con `instanceof File`: en los tipos del worker
+  // el valor del formulario no es la clase File del DOM.
+  const archivo = form?.get("audio") as
+    | { size?: number; type?: string; arrayBuffer?: () => Promise<ArrayBuffer> }
+    | null;
+  if (!archivo || typeof archivo.arrayBuffer !== "function" || !archivo.size) {
+    return c.html(`<span class="text-stone-400">No llegó ninguna grabación.</span>`);
+  }
+  if (archivo.size > MAX_BYTES_AUDIO) {
+    return c.html(
+      `<span class="text-red-600">✗ La grabación pesa demasiado (el tope de WhatsApp son 16 MB).</span>`,
+    );
+  }
+  const mime = tipoBase(archivo.type || "");
+  if (!formatoGrabable(mime)) {
+    return c.html(
+      `<span class="text-red-600">✗ WhatsApp no acepta el formato «${escapeHtml(mime || "desconocido")}».</span>`,
+    );
+  }
+
+  const telefono = telefonoDe(conv.channel_user_id);
+  if (!telefono) {
+    return c.html(
+      `<span class="text-red-600">✗ Este contacto no tiene un número de WhatsApp válido. Respóndele por escrito.</span>`,
+    );
+  }
+
+  try {
+    await enviarNotaDeVoz(c.env, telefono, await archivo.arrayBuffer(), mime);
+  } catch (e) {
+    console.error("[nota-de-voz] no se pudo enviar:", e);
+    return c.html(`<span class="text-red-600">✗ ${escapeHtml(motivoEntendible(e))}</span>`);
+  }
+
+  const msgs = new MessagesRepo(db);
+  await msgs.append(id, "owner", "🎤 Nota de voz del equipo.");
+  await convs.touchLastMessage(id);
+  await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
+
+  c.header("X-Sent", "1");
+  return c.html(
+    `<span class="text-emerald-600">✓ Nota de voz enviada. El bot queda pausado en este chat.</span>` +
       `<div id="thread-live" hx-swap-oob="innerHTML">${await renderThreadLive(c.env, id)}</div>`,
   );
 });
