@@ -18,6 +18,16 @@ export const ADMIN_USERNAME = "admin";
  * Mount it on the `/admin/*` group, e.g. `app.use("/admin/*", adminAuth(env))`.
  */
 export function adminAuth(env: Env): MiddlewareHandler {
+  // Fail CERRADO si no hay password configurado. `basicAuth` de Hono compara
+  // contra sha256(String(password)); con DASHBOARD_PASSWORD ausente eso es
+  // String(undefined) === "undefined", así que un atacante que mande
+  // literalmente `admin:undefined` entra al panel. Esta plantilla es MIT y la
+  // instala gente que puede olvidar el secret, así que preferimos un 503
+  // explicable antes que un panel abierto.
+  if (!env.DASHBOARD_PASSWORD) {
+    return async (c) =>
+      c.text("Panel admin no configurado: falta el secret DASHBOARD_PASSWORD.", 503);
+  }
   return basicAuth({
     username: ADMIN_USERNAME,
     password: env.DASHBOARD_PASSWORD,
@@ -83,7 +93,12 @@ export function checkBasicCredentials(
   const username = decoded.slice(0, sep);
   const password = decoded.slice(sep + 1);
 
+  // Sin password configurado no hay credencial válida posible: con el `?? ""`
+  // anterior, `admin:` (password vacío) autenticaba.
+  const expected = env.DASHBOARD_PASSWORD;
+  if (!expected) return false;
+
   const userOk = timingSafeEqual(username, ADMIN_USERNAME);
-  const passOk = timingSafeEqual(password, env.DASHBOARD_PASSWORD ?? "");
+  const passOk = timingSafeEqual(password, expected);
   return userOk && passOk;
 }
