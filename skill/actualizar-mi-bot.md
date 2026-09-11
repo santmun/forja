@@ -131,10 +131,33 @@ git status --porcelain src/
 
 La estrategia: traer `upstream/main`, aceptar lo nuevo en `src/` y el resto, pero **siempre conservar el `member/` del miembro**.
 
+**Antes de elegir el comando, averigua si esta instalación tiene código propio
+en `src/` ya commiteado** (no solo sin guardar — eso es el Paso 4):
+
 ```bash
-# 1) Asegura que member/ no se pierda: marca la carpeta como "siempre mía"
-git merge upstream/main --no-edit -X theirs
+git log --oneline $(git merge-base HEAD upstream/main)..HEAD -- src/ test/
 ```
+
+- **No devuelve nada** (el caso normal: el miembro nunca tocó el motor) →
+  usa el camino cómodo:
+
+  ```bash
+  git merge upstream/main --no-edit -X theirs
+  ```
+
+- **Devuelve commits** (alguien extendió Forja: un canal nuevo, una tool, un
+  fix propio) → **NO uses `-X theirs`**. Esa opción entrega a upstream TODO
+  hunk en conflicto, así que se lleva ese trabajo sin avisar y sin dejar
+  rastro. Mergea sin estrategia y resuelve conflicto por conflicto:
+
+  ```bash
+  git merge upstream/main          # sin -X: los conflictos se marcan y se resuelven
+  pnpm test && pnpm typecheck      # la suite es la red de seguridad
+  ```
+
+  Si son muchos conflictos, avísale al miembro que esto es trabajo de
+  revisión, no un comando: se resuelve archivo por archivo, quedándose con lo
+  suyo donde upstream no aporta nada y adoptando lo de upstream donde sí.
 
 Si el merge marca conflictos en `member/`, **resuélvelos siempre a favor del miembro** (la versión local):
 ```bash
@@ -150,6 +173,24 @@ git commit --no-edit
 > Igual: ante cualquier conflicto en `member/`, gana la versión local (`--ours`).
 
 Verifica que `member/` siga intacto comparándola contra antes del merge (debe estar sin cambios respecto a lo que el miembro tenía).
+
+> ⚠️ **Un merge sin conflictos NO garantiza que el comportamiento se conservó.**
+> Git marca los choques de TEXTO, no los de intención: si upstream cambió el
+> mismo comportamiento en otro lugar del archivo (o en otro archivo), el merge
+> entra limpio y el cambio se aplica igual. Después de mergear, y sobre todo si
+> el miembro tenía código propio, revisa a mano los archivos que cambiaron de
+> los dos lados:
+>
+> ```bash
+> git diff --name-only $(git merge-base HEAD@{1} upstream/main) HEAD@{1} > /tmp/mios.txt
+> git diff --name-only $(git merge-base HEAD@{1} upstream/main) upstream/main > /tmp/upstream.txt
+> comm -12 <(sort /tmp/mios.txt) <(sort /tmp/upstream.txt)
+> ```
+>
+> Esos son los archivos donde hay que leer el resultado, no solo confiar en que
+> compiló. Los tests ayudan, pero un test verde tampoco prueba que el
+> comportamiento que el miembro quería sigue ahí — solo que no se rompió lo que
+> estaba cubierto.
 
 ## Paso 6 — Reinstalar dependencias si cambiaron
 
