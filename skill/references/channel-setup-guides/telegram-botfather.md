@@ -71,7 +71,8 @@ Enter. (No se va a ver en pantalla mientras lo pegas; es normal por seguridad.)
 ## Paso 3 — Publicar el bot y conectar el webhook
 
 El "webhook" es el puente que le dice a Telegram: *"cuando alguien me escriba,
-manda el mensaje a mi Worker"*. Tu Worker lo configura solo al publicarse.
+manda el mensaje a mi Worker"*. Son dos pasos: publicar y después registrarlo
+en Telegram **una sola vez**.
 
 1. Publica tu bot con:
 
@@ -79,14 +80,25 @@ manda el mensaje a mi Worker"*. Tu Worker lo configura solo al publicarse.
    pnpm run deploy
    ```
 
-2. Al terminar, el Worker registra el webhook automáticamente apuntando a:
+2. Registra el webhook en Telegram. Esto **no es automático**: hay que decirle
+   a Telegram a dónde mandar los mensajes, y se hace una única vez por bot
+   (Telegram lo recuerda). Corre este comando con tu token y tu URL:
 
-   ```
-   https://TU-WORKER.workers.dev/webhooks/telegram
+   ```bash
+   curl -X POST "https://api.telegram.org/bot<TU_TELEGRAM_BOT_TOKEN>/setWebhook" \
+     -H "Content-Type: application/json" \
+     -d '{"url":"https://TU-WORKER.workers.dev/webhooks/telegram"}'
    ```
 
-   (Esa dirección sale de la variable `DASHBOARD_BASE_URL` de tu
-   `wrangler.toml`.)
+   Debe contestar `{"ok":true,...}`. La dirección es la de tu Worker (la misma
+   de la variable `DASHBOARD_BASE_URL` de tu `wrangler.toml`) con la ruta
+   `/webhooks/telegram` al final.
+
+   Para comprobar que quedó:
+
+   ```bash
+   curl "https://api.telegram.org/bot<TU_TELEGRAM_BOT_TOKEN>/getWebhookInfo"
+   ```
 
 3. **Pruébalo**: abre tu bot en Telegram (búscalo por el username que elegiste,
    ej. `@tacoselguero_bot`), toca **Start** y mándale un mensaje. Si te
@@ -205,7 +217,8 @@ Business aprobado.
 
 - [ ] Creé el bot con @BotFather y copié el token.
 - [ ] Guardé `TELEGRAM_BOT_TOKEN` con `wrangler secret put`.
-- [ ] Corrí `pnpm run deploy` y el webhook quedó conectado.
+- [ ] Corrí `pnpm run deploy`.
+- [ ] Registré el webhook con `setWebhook` y me contestó `{"ok":true}`.
 - [ ] Le mandé un mensaje a mi bot y me respondió.
 - [ ] Mandé `/start`, copié mi chat ID del dashboard y guardé
       `OWNER_TELEGRAM_CHAT_ID`.

@@ -103,8 +103,8 @@ bindings creados. Si falta algo, se detiene y te dice qué.
 
 | Síntoma | Causa | Cómo arreglarlo |
 |---|---|---|
-| El bot no responde en Telegram | el webhook no está configurado o apunta mal | corre el `setWebhook` de la guía de Telegram apuntando a `https://<tu-worker>.workers.dev/telegram` |
-| Telegram: el webhook responde error | token mal o URL incorrecta | verifica con `getWebhookInfo`; revisa `TELEGRAM_BOT_TOKEN` y que la URL termine en `/telegram` |
+| El bot no responde en Telegram | el webhook no está configurado o apunta mal | corre el `setWebhook` de la guía de Telegram apuntando a `https://<tu-worker>.workers.dev/webhooks/telegram` |
+| Telegram: el webhook responde error | token mal o URL incorrecta | verifica con `getWebhookInfo`; revisa `TELEGRAM_BOT_TOKEN` y que la URL termine en `/webhooks/telegram` |
 | El bot tarda mucho en responder (>10s) | el buffer de mensajes está alto | baja `BUFFER_SECONDS` en `wrangler.toml` (ej. `5`) y redeploya |
 | El bot agrupa varios mensajes en una sola respuesta | comportamiento esperado del buffer | si lo quieres más reactivo baja `BUFFER_SECONDS`; si quieres que junte más, súbelo |
 | El bot responde en el idioma equivocado | `BOT_LANGUAGE` mal configurado | edita `BOT_LANGUAGE` en `wrangler.toml` y redeploya |
