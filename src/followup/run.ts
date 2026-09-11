@@ -9,9 +9,10 @@
  *    hablando, eso es un pendiente del agente, no un follow-up).
  *  • Y es un lead que VALE el toque: venta abierta detectada por el Analista
  *    (sale_opportunity) o 4+ mensajes del cliente (engagement alto).
- *  • Nunca a conversaciones pausadas (takeover del dueño), nunca por el canal
- *    instagram oficial (apagado), y UNA sola vez por conversación de por vida
- *    (followup_sends es el claim). Cap por corrida y cap diario.
+ *  • Nunca a conversaciones pausadas (takeover del dueño), nunca con un ticket
+ *    humano abierto (open_ticket_id), nunca por el canal instagram oficial
+ *    (apagado), y UNA sola vez por conversación de por vida (followup_sends
+ *    es el claim). Cap por corrida y cap diario.
  *
  * El mensaje lo redacta el modelo rápido en la voz del bot (breve, no pushy),
  * se persiste como mensaje del asistente (visible en la Bandeja) y sale por el
@@ -69,6 +70,7 @@ export async function pickFollowupCandidates(
        LEFT JOIN followup_sends f ON f.conversation_id = c.id
        WHERE f.conversation_id IS NULL
          AND c.channel != 'instagram'
+         AND c.open_ticket_id IS NULL
          AND (c.paused_until IS NULL OR c.paused_until < ?)
      )
      WHERE last_user_at IS NOT NULL

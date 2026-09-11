@@ -44,5 +44,7 @@ describe("handoffHumanTool", () => {
     const list = await tickets.listOpen();
     expect(list).toHaveLength(1);
     expect(list[0].summary).toContain("María");
+    const convs = new ConversationsRepo(new Db(env.DB));
+    expect((await convs.getById(convId))?.open_ticket_id).toBe(list[0].id);
   });
 });

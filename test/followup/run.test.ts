@@ -131,6 +131,26 @@ describe("pickFollowupCandidates — selección", () => {
     const c = await pickFollowupCandidates(env, NOW, 10);
     expect(c).toHaveLength(0);
   });
+
+  it("salta conversaciones con ticket humano abierto y las vuelve a elegir al resolver", async () => {
+    const { TicketsRepo } = await import("../../src/db/tickets");
+    const tickets = new TicketsRepo(db);
+    const convId = await seed("handoff");
+    await markHot(convId);
+    const ticketId = await tickets.create({
+      conversationId: convId,
+      category: "other",
+      summary: "escalado",
+      transcript: "",
+    });
+    await convs.setOpenTicket(convId, ticketId);
+
+    expect(await pickFollowupCandidates(env, NOW, 10)).toHaveLength(0);
+
+    await tickets.resolve(ticketId, "agente@ejemplo.com");
+    const after = await pickFollowupCandidates(env, NOW, 10);
+    expect(after.map((x) => x.id)).toEqual([convId]);
+  });
 });
 
 describe("runFollowups — envío y garantías", () => {

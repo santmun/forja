@@ -203,3 +203,10 @@ CREATE TABLE IF NOT EXISTS template_sends (
   UNIQUE (campaign_key, conversation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_template_sends_time ON template_sends(sent_at);
+
+-- Release conversations locked to a resolved ticket or a missing ticket id.
+-- Safe to re-run on every db:apply. Matches TicketsRepo.cleanupStaleOpenTicketRefs.
+UPDATE conversations SET open_ticket_id = NULL
+WHERE open_ticket_id IS NOT NULL
+  AND (open_ticket_id NOT IN (SELECT id FROM tickets)
+       OR open_ticket_id IN (SELECT id FROM tickets WHERE status = 'resolved'));
