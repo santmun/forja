@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { createTestMiniflare } from "../helpers/miniflareSetup";
 import { Db } from "../../src/db/client";
-import { ConversationsRepo } from "../../src/db/conversations";
+import { ConversationsRepo, OWNER_TAKEOVER_MS } from "../../src/db/conversations";
 
 let repo: ConversationsRepo;
 
@@ -38,5 +38,10 @@ describe("ConversationsRepo", () => {
     const conv = await repo.getOrCreate("telegram", "user_999");
     await repo.setPausedUntil(conv.id, Date.now() - 60_000);
     expect(await repo.isPaused(conv.id)).toBe(false);
+  });
+
+  it("OWNER_TAKEOVER_MS is a 20-minute hard cap, not an hour", () => {
+    expect(OWNER_TAKEOVER_MS).toBe(20 * 60 * 1000);
+    expect(OWNER_TAKEOVER_MS).toBeLessThan(60 * 60 * 1000);
   });
 });

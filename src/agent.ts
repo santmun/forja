@@ -2,7 +2,6 @@ import { Agent } from "agents";
 import type { SystemModelMessage } from "ai";
 import type { Env } from "./env";
 import { Db } from "./db/client";
-import { ConversationsRepo } from "./db/conversations";
 import { MessagesRepo } from "./db/messages";
 import { isPro } from "./config";
 import { resolveAgentConfig } from "./settings-loader";
@@ -19,6 +18,8 @@ import { formatLlmError } from "./llm/errorDetail";
 import { runLlmTurn } from "./llm/runTurn";
 import { costOfUsage } from "./pricing";
 import type { ChannelId } from "./channels/shared";
+import { ConversationsRepo, OWNER_TAKEOVER_MS } from "./db/conversations";
+import { notifyOwner } from "./tools/handoffHuman";
 import { maskTelegramToken, unmaskTelegramToken } from "./telegramFiles";
 
 export interface SupportAgentState {
@@ -75,10 +76,26 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       conversationId: conv.id,
     });
 
-    // Owner intervened → pause the bot, do NOT process this as user input
+    // Owner intervened → sliding 20-min cap from THIS message. Do not treat
+    // it as customer input and do not arm the alarm. Later owner messages
+    // extend the window; silence past the cap lets the bot resume. Notify
+    // once when takeover starts — not on every echo (that is spam).
     if (payload.isOwnerMessage) {
-      const pausedUntil = Date.now() + 60 * 60 * 1000;
-      await convs.setPausedUntil(conv.id, pausedUntil);
+      const alreadyPaused = await convs.isPaused(conv.id);
+      await convs.setPausedUntil(conv.id, Date.now() + OWNER_TAKEOVER_MS);
+      if (!alreadyPaused) {
+        const inbox = `${this.env.DASHBOARD_BASE_URL || ""}/admin`;
+        await notifyOwner(this.env, {
+          reason: "dueño en el chat",
+          summary:
+            "El bot se pausó 20 minutos. Si sigues escribiendo se extiende; si no contestas, el bot vuelve solo.",
+          ticketId: conv.id,
+          text:
+            `⏸ Tomaste este chat. El bot se calla 20 minutos.\n` +
+            `Si sigues escribiendo, se extiende. Si no contestas, el bot vuelve solo.\n\n` +
+            `Ver: ${inbox}`,
+        }).catch((e) => console.warn("[ingest] takeover notify failed:", e));
+      }
       return { acknowledged: true };
     }
 

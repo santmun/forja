@@ -178,6 +178,10 @@ describe("inbox — pause / resume", () => {
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("bot pausado");
     expect(await convs.isPaused(conv.id)).toBe(true);
+    const fresh = await convs.getById(conv.id);
+    const remaining = (fresh?.paused_until ?? 0) - Date.now();
+    expect(remaining).toBeGreaterThan(19 * 60 * 1000);
+    expect(remaining).toBeLessThanOrEqual(20 * 60 * 1000);
   });
 
   it("resume clears the pause and redirects back into the inbox", async () => {
