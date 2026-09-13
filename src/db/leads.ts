@@ -93,6 +93,20 @@ export class LeadsRepo {
     );
   }
 
+  /**
+   * Borra un lead para siempre.
+   *
+   * Distinto de marcarlo "perdido": ese estado conserva el contacto y sirve
+   * para medir. Borrar lo saca de la base — es para leads de prueba, duplicados,
+   * o cuando la persona pide que se eliminen sus datos.
+   *
+   * No arrastra nada más: la conversación de la que salió sigue existiendo, con
+   * su historia intacta.
+   */
+  async delete(id: string): Promise<void> {
+    await this.db.run("DELETE FROM leads WHERE id = ?", [id]);
+  }
+
   async setExported(id: string, target: string, externalId: string): Promise<void> {
     await this.db.run(
       "UPDATE leads SET exported_to = ?, external_id = ?, updated_at = ? WHERE id = ?",
