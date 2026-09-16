@@ -106,7 +106,9 @@ bindings creados. Si falta algo, se detiene y te dice qué.
 | El bot no responde en Telegram | el webhook no está configurado o apunta mal | corre el `setWebhook` de la guía de Telegram apuntando a `https://<tu-worker>.workers.dev/telegram` |
 | Telegram: el webhook responde error | token mal o URL incorrecta | verifica con `getWebhookInfo`; revisa `TELEGRAM_BOT_TOKEN` y que la URL termine en `/telegram` |
 | El bot tarda mucho en responder (>10s) | el buffer de mensajes está alto | baja `BUFFER_SECONDS` en `wrangler.toml` (ej. `5`) y redeploya |
+| Un mensaje largo (varios datos a la vez) no recibe respuesta; un "hola" sí | el turno del LLM pasaba de 30s dentro del candado del Durable Object | esta versión saca el turno del candado (`waitUntil`). Redeploya. En logs viejos: `blockConcurrencyWhile() … waited for too long` |
 | El bot agrupa varios mensajes en una sola respuesta | comportamiento esperado del buffer | si lo quieres más reactivo baja `BUFFER_SECONDS`; si quieres que junte más, súbelo |
+| El panel `/admin` se pone lento o D1 se queda sin cuota gratis | faltaban índices de `conversation_id` en `leads`/`tickets` | esta versión los agrega. En un bot **ya desplegado** corre `pnpm db:apply:remote` o el SQL de `src/db/MIGRATIONS.md` — cambiar el código no crea el índice en la base remota |
 | El bot responde en el idioma equivocado | `BOT_LANGUAGE` mal configurado | edita `BOT_LANGUAGE` en `wrangler.toml` y redeploya |
 | `streamText failed: 401` / `invalid x-api-key` | la llave de Claude es inválida o expiró | renueva en console.anthropic.com y vuelve a poner `pnpm wrangler secret put ANTHROPIC_API_KEY` |
 | `AI_APICallError: Bad Request` con **body vacío** (`content-length: 0`) hacia Anthropic o Zernio | el edge/WAF corta el `fetch` del Worker (sin `User-Agent`, CR en un secret de Windows, o colo lejos de la API). Anthropic siempre responde JSON si la petición llega | 1) redeploya esta versión (manda `User-Agent` y limpia CR/LF de las llaves). 2) en Windows, vuelve a poner el secret (sin comillas, sin Enter extra). 3) opcional: `AGENT_LOCATION_HINT=wnam` en `[vars]` y **nueva** conversación (el hint solo aplica la primera vez que se crea el Durable Object). 4) opcional: `ANTHROPIC_BASE_URL` de un AI Gateway + secret `CF_AIG_TOKEN`. 5) en `/admin` → Configuración → prueba de modelo: el error ahora incluye `egress GET … origin=yes\|edge?` |
@@ -152,6 +154,7 @@ indexarlos en Vectorize para que el bot use la info nueva.
 | `Vectorize: index not found` | el índice no existe | `pnpm wrangler vectorize create horizontes_bot_kb --dimensions=1024 --metric=cosine` |
 | `dimension mismatch` al indexar | el índice se creó con dimensiones distintas | borra y recrea el índice con `--dimensions=1024` (embeddings BGE) |
 | La búsqueda (`searchKb`) devuelve resultados raros o vacíos | poca info o documentos muy largos | divide los `.md` en secciones claras por tema y reindexa |
+| El panel muestra la KB indexada pero el bot dice que no tiene el dato (scores altos, contenido vacío) | Vectorize no devolvía metadata salvo que se pida `returnMetadata: "all"` | esta versión ya lo pide. Redeploya — no hace falta reindexar |
 | `member/config.local.ts` cambió pero el bot no lo refleja | esa config se lee en runtime, no es KB | no requiere reindex; basta redeploy con `pnpm run deploy` (no toca tu carpeta `member/`) |
 
 **Reindexar la KB** (corre esto cada vez que edites `member/kb/*.md`):

@@ -1,4 +1,5 @@
 import type { Env } from "./env";
+import { upcomingDaysCalendar } from "./time/dateAnchor";
 import { businessTimeZone } from "./time/resolveDate";
 
 export interface SystemPromptInput {
@@ -13,6 +14,7 @@ export interface SystemPromptInput {
   lessons?: string[];               // flywheel: rules distilled from owner takeovers
   customInstructions?: string;      // owner rules ADDED to the generated prompt (never replace it)
   today?: string;                   // fecha/hora actual en la zona del negocio
+  upcomingDays?: string;            // calendario compacto de los próximos ~14 días
 }
 
 const TEMPLATE = `<output_language>
@@ -148,10 +150,13 @@ ${instructions}
 </instrucciones_del_negocio>`
     : "";
 
+  const upcoming = input.upcomingDays?.trim()
+    ? `\n${input.upcomingDays.trim()}`
+    : "";
   const contextoTemporal = input.today
     ? `<contexto_temporal>
 Hoy es ${input.today}. Tu conocimiento de entrenamiento tiene OTRA fecha — ignórala.
-Usa SIEMPRE esta fecha real para hablar de "hoy" o "mañana" con el cliente.
+Usa SIEMPRE esta fecha real para hablar de "hoy" o "mañana" con el cliente.${upcoming}
 Cuando llames una tool de citas/horarios con una fecha relativa ("el viernes",
 "el próximo martes", "mañana"), pasa las PALABRAS del cliente, no un YYYY-MM-DD
 que hayas calculado tú. El sistema resuelve la fecha exacta y el día de la semana.
@@ -206,6 +211,7 @@ export function systemPromptFromEnv(
   nichoPlaybook?: string,
   overrides?: SystemPromptOverrides,
 ): string {
+  const tz = businessTimeZone(env);
   return renderSystemPrompt({
     botName: overrides?.botName ?? env.BOT_NAME,
     businessName: env.BUSINESS_NAME,
@@ -217,6 +223,7 @@ export function systemPromptFromEnv(
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
     customInstructions: overrides?.customInstructions,
-    today: currentDateLine(businessTimeZone(env)),
+    today: currentDateLine(tz),
+    upcomingDays: upcomingDaysCalendar(tz, { locale: env.BOT_LANGUAGE }),
   });
 }

@@ -106,6 +106,7 @@ describe("systemPromptFromEnv", () => {
     const prompt = systemPromptFromEnv(env, ["scheduleAppointment"], "ctx");
     expect(prompt).toContain("<contexto_temporal>");
     expect(prompt).toContain("PALABRAS del cliente");
+    expect(prompt).toContain("usa este calendario para el día de la semana");
     expect(prompt).not.toContain("y para toda fecha que pases a las tools");
   });
 

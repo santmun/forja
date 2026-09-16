@@ -206,8 +206,8 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
 
   /**
    * Called by the agents SDK scheduler when the msg-buffer task fires.
-   * Processes accumulated messages as one input, runs the LLM loop, and
-   * sends the chunked reply over the channel adapter.
+   * Drains the buffer (keeps burst coalescing) and detaches the LLM turn
+   * from the alarm lock — see `runBufferedTurn`.
    */
   async processBuffer(): Promise<void> {
     const buffered = [...this.state.pendingMessages];
@@ -217,6 +217,33 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     const combined = buffered.map((m) => m.text).join("\n").trim();
     if (!combined) return;
 
+    // agents@0.1.x runs scheduled callbacks from constructor `alarm()` inside
+    // `ctx.blockConcurrencyWhile`. Cloudflare cancels that after ~30s and
+    // resets the DO — a tool-heavy LLM turn dies with no reply and no DB row.
+    // https://github.com/cloudflare/agents/issues/600
+    // Drain first (above) so a second fire sees an empty buffer; run the turn
+    // via waitUntil so the lock is released immediately.
+    const work = this.runBufferedTurn(combined);
+    if (typeof this.ctx.waitUntil === "function") {
+      this.ctx.waitUntil(work);
+      return;
+    }
+    await work;
+  }
+
+  /**
+   * LLM turn for already-drained buffer text. Public so tests can await it
+   * when they want the result instead of flushing `waitUntil`.
+   */
+  async runBufferedTurn(combined: string): Promise<void> {
+    try {
+      await this.runBufferedTurnInner(combined);
+    } catch (e: unknown) {
+      console.error("[SupportAgent.runBufferedTurn] unhandled:", formatLlmError(e));
+    }
+  }
+
+  private async runBufferedTurnInner(combined: string): Promise<void> {
     const db = new Db(this.env.DB);
     const msgs = new MessagesRepo(db);
     const convs = new ConversationsRepo(db);

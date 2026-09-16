@@ -78,6 +78,7 @@ function makeStreamResult(text: string) {
 
 function makeAgent(opts?: { tier?: "free" | "pro"; aiText?: string }) {
   const storage = { setAlarm: vi.fn(), getAlarm: vi.fn() };
+  const waitUntilJobs: Promise<unknown>[] = [];
 
   const env: any = {
     DB: {},
@@ -93,7 +94,13 @@ function makeAgent(opts?: { tier?: "free" | "pro"; aiText?: string }) {
   // Instantiate via the constructor so class field initializers run — this is
   // what makes the arrow-function `alarm` field exist on the instance.
   // `setState` lives on the mocked base `Agent` prototype.
-  const agent: any = new (SupportAgent as any)({ storage }, env);
+  const ctx = {
+    storage,
+    waitUntil(p: Promise<unknown>) {
+      waitUntilJobs.push(p);
+    },
+  };
+  const agent: any = new (SupportAgent as any)(ctx, env);
   agent.setState({
     conversationId: "conv-1",
     channel: "telegram",
@@ -106,7 +113,12 @@ function makeAgent(opts?: { tier?: "free" | "pro"; aiText?: string }) {
     imageRetryCount: 0,
   });
 
-  return { agent, env, storage };
+  return {
+    agent,
+    env,
+    storage,
+    flushWaitUntil: () => Promise.all(waitUntilJobs),
+  };
 }
 
 function stubConversations(opts?: { paused?: boolean }) {
@@ -216,7 +228,7 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
   });
 
   async function runAlarm(opts: { tier: "free" | "pro"; lastContent: string }) {
-    const { agent } = makeAgent({ tier: opts.tier });
+    const { agent, flushWaitUntil } = makeAgent({ tier: opts.tier });
 
     // Fresh stream result per call (the async generator is one-shot).
     streamTextMock.mockReset();
@@ -244,6 +256,7 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
     ];
 
     await agent.processBuffer();
+    await flushWaitUntil();
     return streamTextMock.mock.calls[0][0].messages;
   }
 
@@ -272,7 +285,7 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
   });
 
   it("caches the system prompt as a SystemModelMessage with an ephemeral breakpoint", async () => {
-    const { agent } = makeAgent({ tier: "free" });
+    const { agent, flushWaitUntil } = makeAgent({ tier: "free" });
 
     streamTextMock.mockReset();
     streamTextMock.mockImplementation(() => makeStreamResult("ok"));
@@ -292,6 +305,7 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
 
     agent.state.pendingMessages = [{ text: "hola", receivedAt: Date.now() }];
     await agent.processBuffer();
+    await flushWaitUntil();
 
     const arg = streamTextMock.mock.calls[0][0];
     expect(Array.isArray(arg.system)).toBe(true);
@@ -305,7 +319,7 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
 
   it("honors model_override=sonnet from settings", async () => {
     stubSettings({ model_override: "sonnet" });
-    const { agent } = makeAgent({ tier: "free" });
+    const { agent, flushWaitUntil } = makeAgent({ tier: "free" });
 
     streamTextMock.mockReset();
     streamTextMock.mockImplementation(() => makeStreamResult("ok"));
@@ -325,13 +339,14 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
 
     agent.state.pendingMessages = [{ text: "hola", receivedAt: Date.now() }];
     await agent.processBuffer();
+    await flushWaitUntil();
 
     const arg = streamTextMock.mock.calls[0][0];
     expect(arg.model).toEqual({ modelId: "claude-sonnet-4-5-20250929" });
   });
 
   it("si streamText tira 400, manda la respuesta de generateText (no el error genérico)", async () => {
-    const { agent } = makeAgent({ tier: "free" });
+    const { agent, flushWaitUntil } = makeAgent({ tier: "free" });
     const sendReply = vi.fn(async () => {});
 
     streamTextMock.mockReset();
@@ -360,12 +375,80 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
 
     agent.state.pendingMessages = [{ text: "hola", receivedAt: Date.now() }];
     await agent.processBuffer();
+    await flushWaitUntil();
 
     expect(generateTextMock).toHaveBeenCalledTimes(1);
     expect(sendReply).toHaveBeenCalled();
     const sent = sendReply.mock.calls.at(0)?.at(0) as { chunks: string[] } | undefined;
     expect(sent?.chunks.join("")).toContain("Hola, ¿en qué te ayudo?");
     expect(sent?.chunks.join("")).not.toMatch(/Algo falló de mi lado/);
+  });
+
+  it("returns before the LLM turn finishes so the alarm lock is not held", async () => {
+    const { agent, flushWaitUntil } = makeAgent({ tier: "free" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+
+    streamTextMock.mockReset();
+    streamTextMock.mockImplementation(() => makeStreamResult("ok"));
+    vi.spyOn(MessagesRepo.prototype, "append").mockImplementation(async () => {
+      await gate;
+      return "msg-1";
+    });
+    vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
+      { role: "user", content: "tour + fecha + 4 pax + hotel" },
+    ] as any);
+    vi.spyOn(ConversationsRepo.prototype, "touchLastMessage").mockResolvedValue(
+      undefined as any,
+    );
+    vi.spyOn(senderMod, "pickAdapter").mockReturnValue({
+      sendReply: vi.fn(async () => {}),
+    } as any);
+
+    agent.state.pendingMessages = [
+      { text: "tour + fecha + 4 pax + hotel", receivedAt: Date.now() },
+    ];
+
+    await expect(agent.processBuffer()).resolves.toBeUndefined();
+    expect(agent.state.pendingMessages).toHaveLength(0);
+    expect(streamTextMock).not.toHaveBeenCalled();
+
+    release();
+    await flushWaitUntil();
+    expect(streamTextMock).toHaveBeenCalled();
+  });
+
+  it("a second processBuffer during an in-flight turn does not re-send the same buffer", async () => {
+    const { agent, flushWaitUntil } = makeAgent({ tier: "free" });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+
+    streamTextMock.mockReset();
+    streamTextMock.mockImplementation(() => makeStreamResult("ok"));
+    vi.spyOn(MessagesRepo.prototype, "append").mockImplementation(async () => {
+      await gate;
+      return "msg-1";
+    });
+    vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
+      { role: "user", content: "hola" },
+    ] as any);
+    vi.spyOn(ConversationsRepo.prototype, "touchLastMessage").mockResolvedValue(
+      undefined as any,
+    );
+    const sendReply = vi.fn(async () => {});
+    vi.spyOn(senderMod, "pickAdapter").mockReturnValue({ sendReply } as any);
+
+    agent.state.pendingMessages = [{ text: "hola", receivedAt: Date.now() }];
+    await agent.processBuffer();
+    await agent.processBuffer(); // empty buffer — no second turn
+    release();
+    await flushWaitUntil();
+
+    expect(sendReply).toHaveBeenCalledTimes(1);
   });
 });
 

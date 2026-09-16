@@ -165,7 +165,9 @@ Si la versión nueva trae cambios en el esquema de la base (`src/db/schema.sql` 
 ```bash
 git diff HEAD@{1} HEAD --name-only | grep "src/db/schema.sql" && pnpm db:apply:remote
 ```
-Esto **agrega** columnas/tablas nuevas. No borra los datos existentes (conversaciones, leads).
+Esto **agrega** columnas, tablas e índices nuevos (`CREATE … IF NOT EXISTS`). No borra los datos existentes (conversaciones, leads).
+
+Si `src/db/schema.sql` no cambió pero hay un archivo nuevo en `src/db/migrations/`, aplícalo a la base remota (ver `src/db/MIGRATIONS.md`). Un bot que ya existía no recibe índices nuevos hasta que corras uno de esos dos caminos.
 
 ## Paso 8 — Publicar y sincronizar la base de conocimiento
 
