@@ -52,7 +52,7 @@ import { Db } from "../db/client";
 import { LeadsRepo, type Lead } from "../db/leads";
 import { TicketsRepo } from "../db/tickets";
 import { ConversationsRepo } from "../db/conversations";
-import { MessagesRepo } from "../db/messages";
+import { MessagesRepo, usableHistory } from "../db/messages";
 import { SettingsRepo, SETTING_KEYS, type SettingKey } from "../db/settings";
 import { CONTROLS, levelToValue } from "./control-levels";
 import { systemPromptFromEnv } from "../system-prompt";
@@ -661,7 +661,7 @@ function escapeHtml(s: string): string {
 // is no per-route auth check here (no magic-link `requireAuth`).
 adminApp.post("/conversations/:id/suggest", async (c) => {
   const msgs = new MessagesRepo(new Db(c.env.DB));
-  const history = await msgs.lastN(c.req.param("id"), 20);
+  const history = usableHistory(await msgs.lastN(c.req.param("id"), 20));
   const { model } = createModel(c.env, "fast", await loadLlmOverrides(c.env));
   const aiMessages = history.map((m) => ({
     role: (m.role === "tool" ? "user" : m.role === "owner" ? "assistant" : m.role) as

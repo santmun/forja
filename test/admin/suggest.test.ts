@@ -32,14 +32,18 @@ vi.mock("../../src/businessContext", () => ({
 
 // Mock the messages repo so we don't need a real D1 binding.
 const lastNMock = vi.fn();
-vi.mock("../../src/db/messages", () => ({
-  MessagesRepo: class {
-    constructor(_db: unknown) {}
-    lastN(id: string, n: number) {
-      return lastNMock(id, n);
-    }
-  },
-}));
+vi.mock("../../src/db/messages", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../src/db/messages")>();
+  return {
+    ...actual,
+    MessagesRepo: class {
+      constructor(_db: unknown) {}
+      lastN(id: string, n: number) {
+        return lastNMock(id, n);
+      }
+    },
+  };
+});
 
 import { adminApp } from "../../src/admin/routes";
 import type { Env } from "../../src/env";
@@ -112,6 +116,30 @@ describe("admin co-pilot suggestion endpoint", () => {
     const last = callArg.messages[callArg.messages.length - 1];
     expect(last.role).toBe("user");
     expect(last.content).toContain("asistente del dueño");
+  });
+
+  it("omite filas vacías del historial antes de llamar al LLM", async () => {
+    lastNMock.mockResolvedValue([
+      { role: "user", content: "Hola" },
+      { role: "assistant", content: "" },
+      { role: "user", content: "¿siguen ahí?" },
+    ]);
+
+    const res = await adminApp.request(
+      "/conversations/conv-1/suggest",
+      { method: "POST", headers: { Authorization: basicAuthHeader("admin", PASSWORD) } },
+      makeEnv(),
+    );
+    expect(res.status).toBe(200);
+
+    const callArg = generateTextMock.mock.calls[0][0] as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(callArg.messages.map((m) => m.content)).toEqual([
+      "Hola",
+      "¿siguen ahí?",
+      expect.stringContaining("asistente del dueño"),
+    ]);
   });
 
   it("escapes HTML in the LLM output (no injection)", async () => {

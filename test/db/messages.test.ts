@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { createTestMiniflare } from "../helpers/miniflareSetup";
 import { Db } from "../../src/db/client";
 import { ConversationsRepo } from "../../src/db/conversations";
-import { MessagesRepo } from "../../src/db/messages";
+import { MessagesRepo, hasMessageText, usableHistory } from "../../src/db/messages";
 
 let convRepo: ConversationsRepo;
 let msgRepo: MessagesRepo;
@@ -47,5 +47,28 @@ describe("MessagesRepo", () => {
     const msgs = await msgRepo.lastN(convId, 20);
     expect(msgs).toHaveLength(1);
     expect(msgs[0].content).toBe("new");
+  });
+});
+
+describe("usableHistory", () => {
+  it("drops empty and whitespace-only rows so they never reach the LLM", () => {
+    const rows = [
+      { role: "user", content: "hola" },
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "   " },
+      { role: "user", content: "sigo aquí" },
+    ];
+    expect(usableHistory(rows)).toEqual([
+      { role: "user", content: "hola" },
+      { role: "user", content: "sigo aquí" },
+    ]);
+  });
+
+  it("hasMessageText treats null, empty and whitespace as unusable", () => {
+    expect(hasMessageText("hola")).toBe(true);
+    expect(hasMessageText("")).toBe(false);
+    expect(hasMessageText("  \n")).toBe(false);
+    expect(hasMessageText(null)).toBe(false);
+    expect(hasMessageText(undefined)).toBe(false);
   });
 });

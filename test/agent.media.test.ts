@@ -62,8 +62,15 @@ vi.mock("@ai-sdk/anthropic", () => ({
 }));
 
 function makeStreamResult(text: string) {
+  return makeStreamResultWithTools(text, []);
+}
+
+function makeStreamResultWithTools(
+  text: string,
+  toolCalls: { toolName: string; input: unknown }[],
+) {
   async function* gen() {
-    yield text;
+    if (text) yield text;
   }
   return {
     textStream: gen(),
@@ -72,7 +79,7 @@ function makeStreamResult(text: string) {
       outputTokens: 50,
       cachedInputTokens: 0,
     }),
-    steps: Promise.resolve([{ toolCalls: [] }]),
+    steps: Promise.resolve([{ toolCalls }]),
   };
 }
 
@@ -366,6 +373,63 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
     const sent = sendReply.mock.calls.at(0)?.at(0) as { chunks: string[] } | undefined;
     expect(sent?.chunks.join("")).toContain("Hola, ¿en qué te ayudo?");
     expect(sent?.chunks.join("")).not.toMatch(/Algo falló de mi lado/);
+  });
+
+  it("tool-only turn: no persiste ni envía un assistant vacío", async () => {
+    const { agent } = makeAgent({ tier: "free" });
+    const sendReply = vi.fn(async () => {});
+    const append = vi.fn().mockResolvedValue("msg-id");
+
+    streamTextMock.mockReset();
+    streamTextMock.mockImplementation(() =>
+      makeStreamResultWithTools("", [{ toolName: "pauseBot", input: { minutes: 60 } }]),
+    );
+    generateTextMock.mockReset();
+
+    vi.spyOn(MessagesRepo.prototype, "append").mockImplementation(append);
+    vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
+      { role: "user", content: "hola" },
+    ] as any);
+    vi.spyOn(ConversationsRepo.prototype, "touchLastMessage").mockResolvedValue(undefined as any);
+    vi.spyOn(senderMod, "pickAdapter").mockReturnValue({ sendReply } as any);
+
+    agent.state.pendingMessages = [{ text: "hola", receivedAt: Date.now() }];
+    await agent.processBuffer();
+
+    const assistantAppends = append.mock.calls.filter((c) => c[1] === "assistant");
+    expect(assistantAppends).toHaveLength(0);
+    expect(append).toHaveBeenCalledWith("conv-1", "user", "hola");
+    expect(sendReply).not.toHaveBeenCalled();
+  });
+
+  it("omite filas vacías del historial para que Anthropic no reciba bloques vacíos", async () => {
+    const { agent } = makeAgent({ tier: "free" });
+
+    streamTextMock.mockReset();
+    streamTextMock.mockImplementation(() => makeStreamResult("ok"));
+    generateTextMock.mockReset();
+
+    vi.spyOn(MessagesRepo.prototype, "append").mockResolvedValue(undefined as any);
+    vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
+      { role: "user", content: "hola" },
+      { role: "assistant", content: "" },
+      { role: "assistant", content: "   " },
+      { role: "user", content: "sigo aquí" },
+    ] as any);
+    vi.spyOn(ConversationsRepo.prototype, "touchLastMessage").mockResolvedValue(undefined as any);
+    vi.spyOn(senderMod, "pickAdapter").mockReturnValue({
+      sendReply: vi.fn(async () => {}),
+    } as any);
+
+    agent.state.pendingMessages = [{ text: "sigo aquí", receivedAt: Date.now() }];
+    await agent.processBuffer();
+
+    const messages = streamTextMock.mock.calls[0][0].messages as { role: string; content: string }[];
+    expect(messages.every((m) => String(m.content ?? "").trim().length > 0)).toBe(true);
+    expect(messages).toEqual([
+      { role: "user", content: "hola" },
+      { role: "user", content: "sigo aquí" },
+    ]);
   });
 });
 

@@ -3,7 +3,7 @@ import type { SystemModelMessage } from "ai";
 import type { Env } from "./env";
 import { Db } from "./db/client";
 import { ConversationsRepo } from "./db/conversations";
-import { MessagesRepo } from "./db/messages";
+import { MessagesRepo, usableHistory } from "./db/messages";
 import { isPro } from "./config";
 import { resolveAgentConfig } from "./settings-loader";
 import { buildTools } from "./tools";
@@ -230,8 +230,9 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     await msgs.append(convId, "user", combined);
     await convs.touchLastMessage(convId);
 
-    // Load history (last 20)
-    const history = await msgs.lastN(convId, 20);
+    // Load history (last 20). Skip blank rows: a prior tool-only turn may have
+    // persisted role=assistant content="" and Anthropic rejects empty blocks.
+    const history = usableHistory(await msgs.lastN(convId, 20));
     const aiMessages: any[] = history.slice(0, -1).map((m) => ({
       role: (m.role === "tool"
         ? "user"
@@ -418,20 +419,35 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       }
     }
 
-    // Persist assistant message (with usage + model_used + tool calls)
-    await msgs.append(convId, "assistant", assistantText, {
-      modelUsed: usedModelId,
-      inputTokens,
-      outputTokens,
-      cachedInputTokens: cachedTokens,
-      toolCalls: toolCallsMade.length > 0 ? toolCallsMade : undefined,
-    });
+    // Persist only when there is text. A tool-only turn (pauseBot, etc.) is
+    // valid with empty assistant text; storing "" poisons every later call.
+    const replyText = assistantText.trim();
+    if (replyText) {
+      await msgs.append(convId, "assistant", assistantText, {
+        modelUsed: usedModelId,
+        inputTokens,
+        outputTokens,
+        cachedInputTokens: cachedTokens,
+        toolCalls: toolCallsMade.length > 0 ? toolCallsMade : undefined,
+      });
+    }
 
     // Update state for next turn
     this.setState({
       ...this.state,
       toolCallsInLast2Turns: toolCallCount,
     });
+
+    // Nothing to say — don't send an empty chunk (Telegram 400s on it).
+    if (!replyText) {
+      console.log(
+        `[SupportAgent.processBuffer] tool-only turn, no reply sent, model=${usedModelId}, cost=$${costOfUsage(
+          usedModelId,
+          { input: inputTokens, cached: cachedTokens, output: outputTokens },
+        ).toFixed(5)}`,
+      );
+      return;
+    }
 
     // Chunk + send via the channel adapter
     const chunks = chunkReply(assistantText, cfg.maxChunks);

@@ -28,6 +28,16 @@ export interface AppendOptions {
   createdAt?: number;
 }
 
+/** Anthropic rejects empty text blocks; whitespace-only is equally poison. */
+export function hasMessageText(content: string | null | undefined): boolean {
+  return Boolean(content?.trim());
+}
+
+/** Drop blank rows before sending history to an LLM. */
+export function usableHistory<T extends { content?: string | null }>(rows: T[]): T[] {
+  return rows.filter((m) => hasMessageText(m.content));
+}
+
 export class MessagesRepo {
   constructor(private readonly db: Db) {}
 
