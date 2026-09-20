@@ -4,7 +4,7 @@ import type { ChannelAdapter } from "./channels/shared";
 import { telegramAdapter } from "./channels/telegram";
 import { manychatAdapter } from "./channels/manychat";
 import { twilioAdapter } from "./channels/twilio";
-import { parseMetaEvents, verifyMetaSignature } from "./channels/meta";
+import { parseMetaEvents, verifyMetaSignature, metaProfileName } from "./channels/meta";
 import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
 import { adminApp } from "./admin/routes";
 import { purgeOldMessages } from "./crons/purgeOldMessages";
@@ -131,6 +131,11 @@ app.post("/webhooks/meta", async (c) => {
     // (si no, cada DM se procesa DOBLE: 2x LLM, 2x respuestas al lead y
     // colisiones de rate limit en ráfagas de historias).
     if (msg.channel === "instagram" && c.env.IG_DM_SOURCE === "manychat") continue;
+    // Instagram: el webhook no trae el nombre, así que la conversación se crearía
+    // con el id opaco. Lo resolvemos a "Nombre · @usuario" (best-effort, cacheado).
+    if (msg.channel === "instagram" && !msg.displayName) {
+      msg.displayName = await metaProfileName(c.env, msg.channelUserId);
+    }
     await getAgentStub(c.env, `${msg.channel}:${msg.channelUserId}`).ingest(msg);
   }
   return c.text("EVENT_RECEIVED", 200);

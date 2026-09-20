@@ -23,13 +23,22 @@ interface MetaMessaging {
     text?: string;
     is_echo?: boolean;
     quick_reply?: { payload?: string };
-    attachments?: { type: string; payload?: { url?: string } }[];
+    attachments?: { type: string; payload?: { url?: string; title?: string } }[];
   };
 }
 
 interface MetaWebhookBody {
   object?: string;
   entry?: { id?: string; time?: number; messaging?: MetaMessaging[] }[];
+}
+
+// En los DMs de Instagram el lead comparte MUCHO por adjunto: reels, posts,
+// historias y videos. Antes se descartaban (el `continue` de más abajo) y la
+// conversación parecía vacía ("no me escribió nada"). Los mapeamos a texto/imagen
+// para que se vean en la bandeja. Solo Instagram (Messenger queda igual).
+const IG_SHARE_RE = /^(ig_reel|reel|share|media_share|ig_post|post|album|story_mention|story)$/i;
+function shareLabel(type: string): string {
+  return /story/i.test(type) ? "Historia" : /reel/i.test(type) ? "Reel" : "Publicación";
 }
 
 /**
@@ -55,15 +64,40 @@ export function parseMetaEvents(body: MetaWebhookBody): IncomingMessage[] {
       if (m.quick_reply) continue; // tap de botón (quick reply), no es texto para el LLM
       const sender = ev.sender?.id;
       if (!sender) continue;
-      const audio = m.attachments?.find((a) => a.type === "audio");
-      const image = m.attachments?.find((a) => a.type === "image");
-      if (!m.text && !audio && !image) continue; // ignora recibos/postbacks sin contenido
+      const isIG = channel === "instagram";
+      const atts = m.attachments ?? [];
+      const audio = atts.find((a) => a.type === "audio");
+      const image = atts.find((a) => a.type === "image");
+      // Solo IG: reels/posts/historias/video que antes se perdían.
+      const share = isIG ? atts.find((a) => IG_SHARE_RE.test(a.type)) : undefined;
+      const video = isIG ? atts.find((a) => a.type === "video") : undefined;
+      let imageUrl = image?.payload?.url;
+      const extra: string[] = [];
+      if (share) {
+        const url = share.payload?.url?.trim();
+        const caption = share.payload?.title?.trim();
+        const label = shareLabel(share.type);
+        // Reel/historia: payload.url ES el permalink real (instagram.com/reel/…) →
+        // se puede abrir. Post: Meta solo manda la imagen del CDN (lookaside…), sin
+        // link al post — se muestra esa imagen (lo único disponible).
+        const isPermalink = !!url && /(?:^|\.)instagram\.com\//i.test(url);
+        if (caption) extra.push(caption);
+        if (url && isPermalink) extra.push(`🎬 ${label}: ${url}`);
+        else if (url) { imageUrl = imageUrl ?? url; extra.push(`🖼️ ${label} compartida`); }
+        else extra.push(`🖼️ ${label} compartida`);
+      }
+      if (video && !share) {
+        const url = video.payload?.url?.trim();
+        extra.push(url ? `🎥 Video: ${url}` : "🎥 Video");
+      }
+      const text = [m.text, extra.join("\n")].filter(Boolean).join("\n") || undefined;
+      if (!text && !audio && !imageUrl) continue; // ignora recibos/postbacks sin contenido
       out.push({
         channel,
         channelUserId: String(sender),
-        text: m.text || undefined,
+        text,
         audioUrl: audio?.payload?.url,
-        imageUrl: image?.payload?.url,
+        imageUrl,
         isOwnerMessage: false,
         receivedAt: Date.now(),
         rawPayload: ev,
@@ -71,6 +105,42 @@ export function parseMetaEvents(body: MetaWebhookBody): IncomingMessage[] {
     }
   }
   return out;
+}
+
+// Nombre/usuario del contacto de INSTAGRAM (para no mostrar el ID opaco en la
+// bandeja). El webhook NO trae el nombre; hay que pedirlo a Graph. Cache por id
+// dentro del isolate. Solo IG: Messenger no expone el nombre de un PSID sin
+// suscribir la app + App Review, así que ahí no se intenta. Best-effort: si
+// falla (o falta el token), devuelve undefined y la conversación queda con el id.
+const igNameCache = new Map<string, string>();
+export async function metaProfileName(env: Env, id: string): Promise<string | undefined> {
+  const token = env.INSTAGRAM_ACCESS_TOKEN;
+  if (!token) return undefined;
+  if (igNameCache.has(id)) return igNameCache.get(id) || undefined;
+  try {
+    const r = await egressFetch(
+      `https://graph.instagram.com/${GRAPH_VERSION}/${encodeURIComponent(id)}` +
+        `?fields=name,username&access_token=${encodeURIComponent(token)}`,
+    );
+    if (!r.ok) {
+      // code 230 "User consent is required": IG no expone el nombre de quien no te
+      // ha escrito/consentido. Se cachea vacío; cuando responda, se resuelve solo.
+      igNameCache.set(id, "");
+      return undefined;
+    }
+    const j = (await r.json()) as { name?: string; username?: string };
+    // El `name` a veces es el nombre de negocio; el @usuario es lo que identifica
+    // la cuenta. Se muestran juntos cuando hay ambos: "Nombre · @usuario".
+    const nm = (j.name ?? "").trim();
+    const un = (j.username ?? "").trim();
+    const name = nm && un ? `${nm} · @${un}` : nm || (un ? `@${un}` : "");
+    // Si aún no llegó el username (a veces tarda en propagarse), no lo cacheamos:
+    // el próximo mensaje reintenta y lo enriquece.
+    if (un || !name) igNameCache.set(id, name);
+    return name || undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
