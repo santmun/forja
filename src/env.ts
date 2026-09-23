@@ -13,6 +13,12 @@ export interface Env {
   // Vars (member-set)
   BOT_NAME: string;
   PEER_BOTS?: string; // JSON [{name,url}] — otras instancias para el selector de proyectos
+  // TEMA CLARO DEL PANEL (opcional). Sin PANEL_TEMA el panel se ve igual que
+  // siempre: ver src/admin/views/temaClaro.ts.
+  PANEL_TEMA?: string; // "claro" para encenderlo
+  TEMA_FUENTE?: string; // familia de Google Fonts, ej. "Fira Sans"
+  TEMA_COLOR?: string; // color principal de la marca, ej. "#2f7fbf"
+  TEMA_COLOR2?: string; // color secundario
   WA_DAILY_TEMPLATE_CAP?: string; // tope diario de plantillas HSM (default 250 — tier 1 de Meta)
   BUSINESS_NAME: string;
   BOT_LANGUAGE: string;
