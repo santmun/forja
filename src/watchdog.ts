@@ -11,6 +11,7 @@ import type { Env } from "./env";
 import { Db } from "./db/client";
 import { SettingsRepo } from "./db/settings";
 import { notifyOwner } from "./tools/handoffHuman";
+import { LLM_FAILURE_REPLIES, LLM_FAILURE_LEGACY_PREFIX } from "./failureReply";
 
 const WINDOW_MS = 30 * 60 * 1000;
 export const ALERT_THRESHOLD = 3;
@@ -27,8 +28,8 @@ export async function checkBotHealth(env: Env, now = Date.now()): Promise<Watchd
   const failures =
     (
       await db.first<{ n: number }>(
-        "SELECT COUNT(*) as n FROM messages WHERE role = 'assistant' AND content LIKE 'Algo falló%' AND created_at > ?",
-        [now - WINDOW_MS],
+        "SELECT COUNT(*) as n FROM messages WHERE role = 'assistant' AND (content IN (?, ?) OR content LIKE ?) AND created_at > ?",
+        [LLM_FAILURE_REPLIES.es, LLM_FAILURE_REPLIES.en, `${LLM_FAILURE_LEGACY_PREFIX}%`, now - WINDOW_MS],
       )
     )?.n ?? 0;
 

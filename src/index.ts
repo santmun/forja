@@ -258,7 +258,7 @@ export default {
     const { runFollowups } = await import("./followup/run");
     await runFollowups(env).catch((e) => console.error("followups:", e));
 
-    // Watchdog: si el bot está fallando en cadena (3+ "Algo falló" en 30 min),
+    // Watchdog: si el bot está fallando en cadena (3+ respuestas de falla en 30 min, ver failureReply.ts),
     // avisa al dueño por su canal de handoff. Throttle 6h. Lo ÚNICO que debe
     // despertarlo en la noche.
     const { checkBotHealth } = await import("./watchdog");

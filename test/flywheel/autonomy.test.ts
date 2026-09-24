@@ -25,6 +25,7 @@ import { SettingsRepo, SETTING_KEYS } from "../../src/db/settings";
 import { autoApplyPending } from "../../src/flywheel/apply";
 import { getLessons } from "../../src/flywheel/detect";
 import { checkBotHealth, ALERT_THRESHOLD } from "../../src/watchdog";
+import { LLM_FAILURE_REPLIES } from "../../src/failureReply";
 import type { Env } from "../../src/env";
 
 const PASSWORD = "secret123";
@@ -115,12 +116,12 @@ describe("autoApplyPending (copiloto)", () => {
 });
 
 describe("watchdog (checkBotHealth)", () => {
-  async function seedFailures(n: number, at: number) {
+  async function seedFailures(n: number, at: number, text = "Algo falló de mi lado, ¿me repites tu mensaje?") {
     const convs = new ConversationsRepo(db);
     const msgs = new MessagesRepo(db);
     const conv = await convs.getOrCreate("twilio", "wd-user");
     for (let i = 0; i < n; i++) {
-      await msgs.append(conv.id, "assistant", "Algo falló de mi lado, ¿me repites tu mensaje?");
+      await msgs.append(conv.id, "assistant", text);
     }
     // Fuerza el created_at dentro/fuera de la ventana según el test.
     await db.run("UPDATE messages SET created_at = ? WHERE role = 'assistant'", [at]);
@@ -136,6 +137,14 @@ describe("watchdog (checkBotHealth)", () => {
     const [, notice] = notifyOwnerMock.mock.calls[0] as unknown[] as [Env, { reason: string; summary: string }];
     expect(notice.reason).toBe("salud del bot");
     expect(notice.summary).toContain("3 respuestas fallidas");
+  });
+
+  it("cuenta también la respuesta de falla nueva (tono humano, es y en)", async () => {
+    const now = 1_800_000_000_000;
+    await seedFailures(2, now - 5 * 60_000, LLM_FAILURE_REPLIES.es);
+    await seedFailures(1, now - 5 * 60_000, LLM_FAILURE_REPLIES.en);
+    const r = await checkBotHealth(env, now);
+    expect(r).toEqual({ failures: 3, alerted: true });
   });
 
   it("no alerta bajo el umbral ni con fallos viejos", async () => {
