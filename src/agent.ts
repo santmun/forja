@@ -17,6 +17,7 @@ import { CustomerFactsRepo } from "./db/facts";
 import { createModel } from "./llm/provider";
 import { formatLlmError } from "./llm/errorDetail";
 import { runLlmTurn } from "./llm/runTurn";
+import { llmFailureReply } from "./failureReply";
 import { costOfUsage } from "./pricing";
 import type { ChannelId } from "./channels/shared";
 import { maskTelegramToken, unmaskTelegramToken } from "./telegramFiles";
@@ -413,8 +414,53 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
         }
       }
 
+      // Turno con FOTO: si ningún modelo pudo con el mensaje multimodal (la
+      // imagen no se pudo descargar, el modelo no tiene visión, el proveedor la
+      // rechazó), el turno sigue con PURO TEXTO. El cliente casi siempre
+      // escribió algo junto a la foto ("quiero info de esta propiedad"): con
+      // eso el bot puede conversar y preguntar qué muestra la foto, en vez de
+      // tumbar el turno completo por la imagen.
       if (!ok) {
-        assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
+        const last: any = aiMessages[aiMessages.length - 1];
+        if (Array.isArray(last?.content)) {
+          const textPart = last.content.find((p: any) => p?.type === "text");
+          aiMessages[aiMessages.length - 1] = {
+            role: "user",
+            content:
+              `${textPart?.text ?? ""}\n[El cliente mandó una FOTO que no pudiste abrir. Sigue la conversación con naturalidad: ` +
+              `pídele que te cuente qué se ve en ella y ofrécele ayuda concreta. No menciones fallas técnicas.]`.trim(),
+          };
+          try {
+            await attempt(model);
+            ok = true;
+            console.warn("[SupportAgent] turno con foto rescatado en modo solo-texto");
+          } catch (eTxt: any) {
+            console.error("[SupportAgent] reintento solo-texto falló:", formatLlmError(eTxt));
+          }
+        }
+      }
+
+      if (!ok) {
+        assistantText = llmFailureReply(this.env.BOT_LANGUAGE);
+        // Aviso INMEDIATO al dueño: un cliente real se quedó sin respuesta. El
+        // watchdog solo alerta con 3+ fallos en 30 min, así que con 1 o 2
+        // nadie se enteraba y el lead se enfriaba.
+        try {
+          const { notifyOwner } = await import("./tools/handoffHuman");
+          const lastUser = (history[history.length - 1]?.content ?? "")
+            .replace(/\[IMAGE_URL: [^\]]+\]/g, "[foto]")
+            .replace(/\s+/g, " ")
+            .trim();
+          await notifyOwner(this.env, {
+            reason: "el bot no pudo responder",
+            summary:
+              `Cliente ${this.state.channelUserId} (${this.state.channel}) se quedó esperando. ` +
+              `Escribió: "${lastUser.slice(0, 200)}". Contéstale tú desde el panel.`,
+            ticketId: `fallo-${convId}`,
+          });
+        } catch (eN) {
+          console.error("[SupportAgent] aviso de fallo al dueño falló:", eN);
+        }
       }
     }
 
