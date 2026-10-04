@@ -18,6 +18,8 @@ import { saveCapture, isLearnMode } from "./learn/mapping";
 import { tokensMatch, manychatWebhookAllowed } from "./http-auth";
 import { apiApp } from "./api";
 import { getAgentStub } from "./agentStub";
+import { webAdapter } from "./channels/web";
+import { demoEnabled, demoOverLimit, demoPage, demoPoll, demoTurnsUsed } from "./demo";
 
 export { SupportAgent } from "./agent";
 
@@ -54,6 +56,21 @@ async function routeToAgent(c: { req: { raw: Request }; env: Env; text: (t: stri
     return c.text(`err: ${e?.message ?? e}`, 500);
   }
 }
+
+// Chat público de /demo. Apagado salvo DEMO_MODE=on. El cursor del poll lo
+// pone el cliente con la hora del servidor (ver src/demo.ts), no con la del
+// navegador.
+app.get("/demo", (c) => demoPage(c));
+app.get("/demo/poll", (c) => demoPoll(c));
+app.post("/demo/send", async (c) => {
+  if (!demoEnabled(c.env)) return c.json({ ok: false, error: "demo_off" }, 404);
+  const body = (await c.req.raw.clone().json().catch(() => ({}))) as { sessionId?: string };
+  const sid = String(body.sessionId ?? "").slice(0, 64);
+  if (sid && demoOverLimit(await demoTurnsUsed(c.env, sid))) {
+    return c.json({ ok: false, error: "limit" }, 429);
+  }
+  return routeToAgent(c, webAdapter);
+});
 
 app.post("/webhooks/telegram", (c) => routeToAgent(c, telegramAdapter));
 // ManyChat — guarded by the X-Api-Key header the setup guide already asks for.

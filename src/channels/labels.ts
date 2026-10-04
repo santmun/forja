@@ -13,6 +13,7 @@ export const CHANNEL_LABELS: Record<string, string> = {
   instagram: "Instagram",
   messenger: "Messenger",
   manychat: "ManyChat",
+  web: "Web",
 };
 
 export function channelLabel(channel: string | null | undefined): string {
