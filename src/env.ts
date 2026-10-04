@@ -21,6 +21,8 @@ export interface Env {
   // re-etiqueta el dashboard, aporta el playbook del giro y sus columnas.
   // Ausente/desconocido → pack genérico (comportamiento actual). Ver src/niches/.
   BOT_NICHE?: string;
+  /** "on" = instancia de demo para un prospecto. Apagado por defecto. */
+  DEMO_MODE?: string;
   // LLM provider for the chat brain: "anthropic" (default) | "openai".
   // If unset and only OPENAI_API_KEY is present, auto-selects "openai".
   // (Voice transcription + embeddings always run on Cloudflare Workers AI.)
