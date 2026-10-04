@@ -1,9 +1,11 @@
 import type { Env } from "../env";
 import { isPro } from "../config";
+import { isDemoMode } from "../demoMode";
 import { searchKbTool } from "./searchKb";
 import { handoffHumanTool } from "./handoffHuman";
 import { pauseBotTool } from "./pauseBot";
 import { snoozeUserTool } from "./snoozeUser";
+import { pauseSuspectedBotTool } from "./pauseSuspectedBot";
 import { captureLeadTool } from "./captureLead";
 import { scheduleAppointmentTool } from "./scheduleAppointment";
 import { catalogQueryTool } from "./catalogQuery";
@@ -26,6 +28,13 @@ export function buildTools(ctx: ToolContext) {
     captureLead: captureLeadTool(ctx.env, ctx.getConversationId),
     scheduleAppointment: scheduleAppointmentTool(ctx.env, ctx.getConversationId),
   };
+
+  // Anti loop bot-a-bot. En DEMO_MODE un prospecto manda justo lo que esta tool
+  // confunde con un bot (3–4 preguntas cortas: precio, horario, ubicación) y
+  // el chat se queda mudo 24 h. En producción la protección se queda.
+  if (!isDemoMode(ctx.env)) {
+    tools.pauseSuspectedBot = pauseSuspectedBotTool(ctx.env, ctx.getConversationId);
+  }
 
   // Pro tier additions
   if (isPro(ctx.env)) {

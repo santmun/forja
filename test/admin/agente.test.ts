@@ -53,12 +53,25 @@ describe("Mi Agente — page and canvas", () => {
     expect(html).toContain("Respuesta");
     expect(html).toContain("Modelo");
     expect(html).toContain("Memoria");
-    // Pro tier: all six tools appear as nodes
-    for (const tool of ["searchKb", "handoffHuman", "pauseBot", "captureLead", "scheduleAppointment", "catalogQuery"]) {
+    // Pro tier: tools de producción, incluida la pausa anti-bot.
+    for (const tool of ["searchKb", "handoffHuman", "pauseBot", "pauseSuspectedBot", "captureLead", "scheduleAppointment", "catalogQuery"]) {
       expect(html).toContain(tool);
     }
     // Buffer shows the effective seconds from env
     expect(html).toContain("8 s");
+  });
+
+  it("oculta pauseSuspectedBot en el canvas cuando DEMO_MODE=on", async () => {
+    const res = await adminApp.request(
+      "/agente",
+      { headers: AUTH },
+      { ...env, DEMO_MODE: "on" } as Env,
+    );
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).not.toContain("pauseSuspectedBot");
+    expect(html).toContain("pauseBot");
+    expect(html).toContain("searchKb");
   });
 
   it("shows real channels from the conversations table", async () => {

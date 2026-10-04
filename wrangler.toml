@@ -35,6 +35,7 @@ BOT_NAME = "{{BOT_NAME}}"
 BUSINESS_NAME = "{{BUSINESS_NAME}}"
 BOT_LANGUAGE = "{{BOT_LANGUAGE}}"
 BOT_TIER = "{{BOT_TIER}}"  # 'free' | 'pro'
+# DEMO_MODE = "on"  # instancia de demo. Con "on" no se registra pauseSuspectedBot.
 BUFFER_SECONDS = "15"
 DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 
