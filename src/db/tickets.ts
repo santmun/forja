@@ -36,6 +36,20 @@ export class TicketsRepo {
     return this.db.first<Ticket>("SELECT * FROM tickets WHERE id = ?", [id]);
   }
 
+  /**
+   * Ticket aún abierto (open o in_progress) de esta conversación, el más reciente.
+   * Sirve para no abrir otro cuando el cliente repite el pedido de humano.
+   */
+  async findOpenByConversation(conversationId: string): Promise<Ticket | null> {
+    return this.db.first<Ticket>(
+      `SELECT * FROM tickets
+       WHERE conversation_id = ? AND status != 'resolved'
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [conversationId],
+    );
+  }
+
   async listOpen(): Promise<Ticket[]> {
     return this.db.all<Ticket>(
       "SELECT * FROM tickets WHERE status != 'resolved' ORDER BY created_at DESC",

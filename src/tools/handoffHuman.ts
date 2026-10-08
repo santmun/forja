@@ -10,7 +10,7 @@ import { isPro } from "../config";
 export function handoffHumanTool(env: Env, getConversationId: () => string | null) {
   return tool({
     description:
-      "Crea un ticket para el dueño + le manda email. Usalo cuando el bot no puede resolver o el cliente pide humano explícitamente.",
+      "Crea un ticket para el dueño + le manda email. Usalo cuando el bot no puede resolver o el cliente pide humano explícitamente. Si esa conversación ya tiene un ticket abierto, reutiliza ese y no avisa otra vez.",
     inputSchema: z.object({
       reason: z.string().describe("Categoría corta del problema"),
       summary: z.string().max(300).describe("Resumen en 1 frase del contexto"),
@@ -20,6 +20,18 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       const convId = getConversationId();
       const db = new Db(env.DB);
       const tickets = new TicketsRepo(db);
+
+      // El cliente que insiste ("quiero una persona" varias veces) no abre un
+      // ticket nuevo ni vuelve a avisar al dueño. open_ticket_id queda en el
+      // ticket que sigue abierto, no en un duplicado.
+      if (convId) {
+        const existing = await tickets.findOpenByConversation(convId);
+        if (existing) {
+          await new ConversationsRepo(db).setOpenTicket(convId, existing.id);
+          return { ticketId: existing.id };
+        }
+      }
+
       const ticketId = await tickets.create({
         conversationId: convId,
         category,
