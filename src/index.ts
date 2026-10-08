@@ -9,7 +9,7 @@ import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
 import { adminApp } from "./admin/routes";
 import { purgeOldMessages } from "./crons/purgeOldMessages";
 import { DAILY_CRON, isNightlyTick } from "./crons/schedule";
-import { reindexKb } from "./kb/reindex";
+import { reindexKb, VectorizeDimensionError } from "./kb/reindex";
 import { analyzeConversations } from "./insights/analyzer";
 import { Db } from "./db/client";
 import { SettingsRepo, SETTING_KEYS } from "./db/settings";
@@ -239,8 +239,15 @@ app.post("/kb/reindex", async (c) => {
   if (!tokensMatch(provided, expected)) {
     return c.json({ ok: false, error: "unauthorized" }, 401);
   }
-  const r = await reindexKb(c.env);
-  return c.json({ ok: true, indexed: r.indexed }, 200);
+  try {
+    const r = await reindexKb(c.env);
+    return c.json({ ok: true, indexed: r.indexed }, 200);
+  } catch (e) {
+    if (e instanceof VectorizeDimensionError) {
+      return c.json({ ok: false, error: "dimension_mismatch", message: e.message }, 400);
+    }
+    throw e;
+  }
 });
 
 app.notFound((c) => c.text("not found", 404));

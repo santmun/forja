@@ -1,5 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
-import { reindexKb, type KbChunk } from "../../src/kb/reindex";
+import {
+  reindexKb,
+  VectorizeDimensionError,
+  isVectorizeDimensionMismatch,
+  type KbChunk,
+} from "../../src/kb/reindex";
 import type { Env } from "../../src/env";
 
 const DIM = 1024;
@@ -101,5 +106,55 @@ describe("reindexKb", () => {
     expect(upsert.mock.calls[0][0].length).toBe(100);
     expect(upsert.mock.calls[1][0].length).toBe(100);
     expect(upsert.mock.calls[2][0].length).toBe(50);
+  });
+
+  it("accepts describe() when the index is already 1024", async () => {
+    const { env, upsert } = makeEnv();
+    (env.KB as unknown as { describe: () => Promise<{ dimensions: number }> }).describe =
+      async () => ({ dimensions: 1024 });
+    await expect(reindexKb(env, makeChunks(1))).resolves.toEqual({ indexed: 1 });
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads dimensions from the beta describe() shape (config.dimensions)", async () => {
+    const { env, upsert } = makeEnv();
+    (env.KB as unknown as { describe: () => Promise<{ config: { dimensions: number } }> }).describe =
+      async () => ({ config: { dimensions: 768 } });
+    await expect(reindexKb(env, makeChunks(1))).rejects.toThrow(/768/);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("rejects before upsert when describe() says the index is not 1024", async () => {
+    const { env, upsert } = makeEnv();
+    (env.KB as unknown as { describe: () => Promise<{ dimensions: number }> }).describe =
+      async () => ({ dimensions: 768 });
+
+    await expect(reindexKb(env, makeChunks(1))).rejects.toBeInstanceOf(VectorizeDimensionError);
+    await expect(reindexKb(env, makeChunks(1))).rejects.toThrow(/768/);
+    await expect(reindexKb(env, makeChunks(1))).rejects.toThrow(/--dimensions=1024 --metric=cosine/);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("translates a Vectorize upsert dimension mismatch into an actionable error", async () => {
+    const { env, upsert } = makeEnv();
+    upsert.mockRejectedValue(new Error("Vector dimension mismatch: expected 768, got 1024"));
+
+    const err = await reindexKb(env, makeChunks(2)).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(VectorizeDimensionError);
+    expect((err as Error).message).toContain("768");
+    expect((err as Error).message).toContain("--dimensions=1024 --metric=cosine");
+  });
+
+  it("recognizes a nested 'dimensions do not match' error", () => {
+    const err = new Error("upsert failed", {
+      cause: new Error("Vector dimensions do not match index configuration"),
+    });
+    expect(isVectorizeDimensionMismatch(err)).toBe(true);
+  });
+
+  it("still rethrows errors that are not a dimension mismatch", async () => {
+    const { env, upsert } = makeEnv();
+    upsert.mockRejectedValueOnce(new Error("network down"));
+    await expect(reindexKb(env, makeChunks(1))).rejects.toThrow("network down");
   });
 });

@@ -39,6 +39,7 @@ import { analyzeConversations } from "../insights/analyzer";
 import { renderAgentePage, renderAgenteCanvas, renderNodeModal, toggleTool, toastOob } from "./views/agente";
 import { renderKbList, renderKbEditor } from "./views/kb";
 import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } from "../kb/docs";
+import { VectorizeDimensionError } from "../kb/reindex";
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
@@ -162,8 +163,13 @@ adminApp.post("/kb/:id/delete", async (c) => {
 
 // Global reindex: repo fixtures + every dashboard doc.
 adminApp.post("/kb/reindex", async (c) => {
-  const r = await reindexAll(c.env);
-  return c.redirect(`/admin/kb?reindexed=${r.indexed}`);
+  try {
+    const r = await reindexAll(c.env);
+    return c.redirect(`/admin/kb?reindexed=${r.indexed}`);
+  } catch (e) {
+    if (e instanceof VectorizeDimensionError) return c.text(e.message, 400);
+    throw e;
+  }
 });
 
 // --- Handoff: plantilla HSM del aviso al dueño ---------------------------------

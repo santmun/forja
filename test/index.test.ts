@@ -9,6 +9,7 @@ import { describe, it, expect, vi } from "vitest";
 vi.mock("agents", () => ({ Agent: class {} }));
 
 import worker from "../src/index";
+import { VectorizeDimensionError } from "../src/kb/reindex";
 
 describe("Worker entry", () => {
   const env = {
@@ -64,6 +65,41 @@ describe("Worker entry", () => {
       // Acá el Worker sí está configurado: no hay nada que avisarle al dueño.
       expect(warn).not.toHaveBeenCalled();
       warn.mockRestore();
+    });
+
+    it("devuelve un mensaje claro si el índice de Vectorize no es de 1024", async () => {
+      const spy = vi.spyOn(await import("../src/kb/reindex"), "reindexKb").mockRejectedValueOnce(
+        new VectorizeDimensionError(
+          "El índice de Vectorize tiene 768 dimensiones y no coincide con las 1024 de bge-m3. Recréalo con --dimensions=1024 --metric=cosine.",
+        ),
+      );
+      const res = await pedir(
+        { "X-Reindex-Token": "el-bueno" },
+        { ...env, KB_REINDEX_TOKEN: "el-bueno" },
+      );
+
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { ok: boolean; error: string; message: string };
+      expect(body.ok).toBe(false);
+      expect(body.error).toBe("dimension_mismatch");
+      expect(body.message).toContain("1024");
+      expect(body.message).toContain("--dimensions=1024 --metric=cosine");
+      expect(body.message).not.toBe("Internal Server Error");
+      spy.mockRestore();
+    });
+
+    it("sigue respondiendo 500 si el reindex falla por otra cosa", async () => {
+      const spy = vi.spyOn(await import("../src/kb/reindex"), "reindexKb").mockRejectedValueOnce(
+        new Error("network down"),
+      );
+      const err = vi.spyOn(console, "error").mockImplementation(() => {});
+      const res = await pedir(
+        { "X-Reindex-Token": "el-bueno" },
+        { ...env, KB_REINDEX_TOKEN: "el-bueno" },
+      );
+      expect(res.status).toBe(500);
+      spy.mockRestore();
+      err.mockRestore();
     });
   });
 });
