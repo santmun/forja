@@ -100,6 +100,22 @@ describe("inbox — page and fragments", () => {
     expect(html).toContain("$0.00"); // turn cost, 4-decimal format
     expect(html).toContain("🟢 bot activo");
   });
+
+  it("un mensaje con marcador de galería se ve como imagen, no como código", async () => {
+    const conv = await convs.getOrCreate("whatsapp", "u-media", "Ana");
+    await msgs.append(conv.id, "user", "Te mando la foto\n[[media: img_porta]]");
+
+    const res = await adminApp.request(
+      `/conversations/thread/${encodeURIComponent(conv.id)}`,
+      { headers: AUTH },
+      env,
+    );
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('<img src="/media/img_porta"');
+    expect(html).toContain("Te mando la foto");
+    expect(html).not.toContain("[[media:");
+  });
 });
 
 describe("inbox — owner reply (takeover)", () => {

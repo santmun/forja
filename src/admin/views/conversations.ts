@@ -19,6 +19,7 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
 import { fmtDateTime } from "../format";
+import { renderMessageHtml } from "../messageHtml";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -327,7 +328,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     .map((m) => {
       const time = fmtDateTime(m.created_at, {
         day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit",
-      });
+      }, env);
 
       // Tool chips (what the bot DID this turn) render above the bubble; in a
       // reversed column that means AFTER it in the DOM.
@@ -347,7 +348,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       if (m.role === "user") {
         return `
         <div style="display:flex;flex-direction:column;align-items:flex-start;gap:4px;max-width:78%">
-          <div style="background:var(--panel2);border:1px solid var(--line);padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
+          <div style="background:var(--panel2);border:1px solid var(--line);padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${renderMessageHtml(m.content)}</div>
           <span style="font-size:9.5px;color:var(--dim)">${time}</span>
         </div>`;
       }
@@ -363,7 +364,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       return `
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:78%;margin-left:auto">
         ${chips}
-        <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
+        <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${renderMessageHtml(m.content)}</div>
         <span style="font-size:9.5px;color:var(--dim)">${meta}</span>
       </div>`;
     })
