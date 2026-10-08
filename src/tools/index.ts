@@ -14,18 +14,22 @@ export interface ToolContext {
 }
 
 export function buildTools(ctx: ToolContext) {
-  // Free tier base set. captureLead y scheduleAppointment van aquí a propósito: el bot
-  // Starter (free) captura prospectos Y agenda citas — Cal.com lo pone el dueño con su
-  // propia cuenta/llave, sin costo para Forja, así que es valor central sin gate. Lo Pro
-  // es consultar catálogo/inventario y las tools avanzadas por nicho.
+  // Free tier base set. captureLead va aquí a propósito: el bot Starter (free)
+  // captura prospectos. scheduleAppointment también es gratis (la llave de
+  // Cal.com es del dueño), pero solo se registra si hay CALCOM_API_KEY: su
+  // esquema pide attendeeEmail y, sin Cal.com, el bot le pide al cliente un
+  // correo "para Cal.com" aunque las citas se agenden por otro lado.
   const tools: Record<string, any> = {
     searchKb: searchKbTool(ctx.env),
     handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId),
     pauseBot: pauseBotTool(ctx.env, ctx.getConversationId),
     snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId),
     captureLead: captureLeadTool(ctx.env, ctx.getConversationId),
-    scheduleAppointment: scheduleAppointmentTool(ctx.env, ctx.getConversationId),
   };
+
+  if ((ctx.env.CALCOM_API_KEY || "").trim()) {
+    tools.scheduleAppointment = scheduleAppointmentTool(ctx.env, ctx.getConversationId);
+  }
 
   // Pro tier additions
   if (isPro(ctx.env)) {

@@ -8,7 +8,7 @@ vi.mock("ai", () => ({
   generateText: (...args: unknown[]) => generateTextMock(...args),
 }));
 
-import { runLlmTurn } from "../../src/llm/runTurn";
+import { joinStepTexts, runLlmTurn } from "../../src/llm/runTurn";
 
 function streamOk(text: string) {
   async function* gen() {
@@ -70,11 +70,65 @@ describe("runLlmTurn", () => {
     expect(generateTextMock.mock.calls[0][0].messages).toEqual(ARGS.messages);
   });
 
+  it("separa con una línea en blanco el texto de antes y después de una tool", async () => {
+    async function* gen() {
+      yield "…el nuevo horario 💛";
+      yield "Ya quedó anotado";
+    }
+    streamTextMock.mockImplementation(() => ({
+      textStream: gen(),
+      usage: Promise.resolve({ inputTokens: 10, outputTokens: 4, cachedInputTokens: 0 }),
+      steps: Promise.resolve([
+        { text: "…el nuevo horario 💛", toolCalls: [{ toolName: "captureLead", input: {} }] },
+        { text: "Ya quedó anotado", toolCalls: [] },
+      ]),
+    }));
+    const r = await runLlmTurn(ARGS);
+    expect(r.text).toBe("…el nuevo horario 💛\n\nYa quedó anotado");
+    expect(r.text).not.toContain("💛Ya");
+  });
+
+  it("un solo paso de texto se deja igual", async () => {
+    streamTextMock.mockImplementation(() => ({
+      textStream: (async function* () {
+        yield "buen día";
+      })(),
+      usage: Promise.resolve({ inputTokens: 1, outputTokens: 1, cachedInputTokens: 0 }),
+      steps: Promise.resolve([{ text: "buen día", toolCalls: [] }]),
+    }));
+    const r = await runLlmTurn(ARGS);
+    expect(r.text).toBe("buen día");
+  });
+
   it("no usa generateText en un 429 — eso es failover de proveedor", async () => {
     streamTextMock.mockImplementation(() => {
       throw Object.assign(new Error("Too Many Requests"), { statusCode: 429 });
     });
     await expect(runLlmTurn(ARGS)).rejects.toThrow(/Too Many Requests/);
     expect(generateTextMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("joinStepTexts", () => {
+  it("separa texto que quedó a los dos lados de una tool en el mismo paso", () => {
+    const joined = joinStepTexts([
+      {
+        content: [
+          { type: "text", text: "…el nuevo horario 💛" },
+          { type: "tool-call", toolName: "captureLead" },
+          { type: "text", text: "Ya quedó anotado" },
+        ],
+      },
+    ]);
+    expect(joined).toBe("…el nuevo horario 💛\n\nYa quedó anotado");
+  });
+
+  it("ignora pasos que solo ejecutaron una tool", () => {
+    expect(
+      joinStepTexts([
+        { text: "listo" },
+        { text: "   ", toolCalls: [{ toolName: "searchKb" }] },
+      ]),
+    ).toBeNull();
   });
 });

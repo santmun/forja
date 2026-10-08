@@ -92,10 +92,13 @@ describe("currentDateLine", () => {
     expect(line).toContain("2026-08-27");
     expect(line.toLowerCase()).toContain("jueves");
     expect(line).toContain("Europe/Madrid");
+    expect(line).toContain("La hora actual es 17:00");
   });
 });
 
 describe("systemPromptFromEnv", () => {
+  afterEach(() => vi.useRealTimers());
+
   it("asks the model to pass relative date words, not a self-computed YYYY-MM-DD", () => {
     const env = {
       BOT_NAME: "Bot",
@@ -107,6 +110,38 @@ describe("systemPromptFromEnv", () => {
     expect(prompt).toContain("<contexto_temporal>");
     expect(prompt).toContain("PALABRAS del cliente");
     expect(prompt).not.toContain("y para toda fecha que pases a las tools");
+  });
+
+  it("incluye la hora local de BOT_TIMEZONE junto a la fecha", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T22:30:00.000Z"));
+    const env = {
+      BOT_NAME: "Bot",
+      BUSINESS_NAME: "Acme",
+      BOT_LANGUAGE: "es",
+      BOT_TIMEZONE: "America/Bogota",
+      CALCOM_TIMEZONE: "Europe/Madrid",
+    } as any;
+    const prompt = systemPromptFromEnv(env, ["searchKb"], "ctx");
+    expect(prompt).toContain("La hora actual es 17:30");
+    expect(prompt).toContain("America/Bogota");
+    expect(prompt).toContain("2026-08-27");
+    expect(prompt).toContain("24 h de anticipación");
+    expect(prompt).not.toContain("Europe/Madrid");
+  });
+
+  it("sin BOT_TIMEZONE la hora sigue la zona de Cal.com", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-27T15:00:00.000Z"));
+    const env = {
+      BOT_NAME: "Bot",
+      BUSINESS_NAME: "Acme",
+      BOT_LANGUAGE: "es",
+      CALCOM_TIMEZONE: "Europe/Madrid",
+    } as any;
+    const prompt = systemPromptFromEnv(env, ["scheduleAppointment"], "ctx");
+    expect(prompt).toContain("La hora actual es 17:00");
+    expect(prompt).toContain("Europe/Madrid");
   });
 
   it("pulls botName/businessName/language from env", () => {

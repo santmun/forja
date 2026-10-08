@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { businessTimeZone } from "./time/resolveDate";
+import { anchorTimeZone, currentDateAnchor } from "./time/dateAnchor";
 
 export interface SystemPromptInput {
   botName: string;
@@ -151,7 +151,8 @@ ${instructions}
   const contextoTemporal = input.today
     ? `<contexto_temporal>
 Hoy es ${input.today}. Tu conocimiento de entrenamiento tiene OTRA fecha — ignórala.
-Usa SIEMPRE esta fecha real para hablar de "hoy" o "mañana" con el cliente.
+Usa SIEMPRE esta fecha y la hora actual para hablar de "hoy", "mañana" o la hora con el cliente
+(saludo de mañana, tarde o noche, y reglas como agendar con 24 h de anticipación).
 Cuando llames una tool de citas/horarios con una fecha relativa ("el viernes",
 "el próximo martes", "mañana"), pasa las PALABRAS del cliente, no un YYYY-MM-DD
 que hayas calculado tú. El sistema resuelve la fecha exacta y el día de la semana.
@@ -181,22 +182,9 @@ export interface SystemPromptOverrides {
   customInstructions?: string;
 }
 
-/** Fecha/hora actual legible + ISO en la zona del negocio (ancla "hoy"/"mañana"). */
-export function currentDateLine(timeZone: string): string {
-  const now = new Date();
-  const legible = new Intl.DateTimeFormat("es-MX", {
-    timeZone,
-    dateStyle: "full",
-    timeStyle: "short",
-  }).format(now);
-  // en-CA formatea YYYY-MM-DD, útil como fecha ISO para las tools.
-  const iso = new Intl.DateTimeFormat("en-CA", {
-    timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).format(now);
-  return `${legible} (fecha ISO: ${iso}, zona horaria: ${timeZone})`;
+/** Fecha y hora actual en la zona del negocio (ancla "hoy"/"mañana" y la hora). */
+export function currentDateLine(timeZone: string, now: Date = new Date()): string {
+  return currentDateAnchor(timeZone, now);
 }
 
 export function systemPromptFromEnv(
@@ -217,6 +205,6 @@ export function systemPromptFromEnv(
     extraEscalationKeywords: overrides?.extraEscalationKeywords,
     lessons: overrides?.lessons,
     customInstructions: overrides?.customInstructions,
-    today: currentDateLine(businessTimeZone(env)),
+    today: currentDateLine(anchorTimeZone(env)),
   });
 }
