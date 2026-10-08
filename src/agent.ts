@@ -17,6 +17,7 @@ import { CustomerFactsRepo } from "./db/facts";
 import { createModel } from "./llm/provider";
 import { formatLlmError } from "./llm/errorDetail";
 import { runLlmTurn } from "./llm/runTurn";
+import type { SearchKbResult } from "./tools/searchKb";
 import { costOfUsage } from "./pricing";
 import type { ChannelId } from "./channels/shared";
 import { maskTelegramToken, unmaskTelegramToken } from "./telegramFiles";
@@ -261,10 +262,18 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       }
     }
 
-    // Build tools registry (tier-gated in buildTools)
+    // Pasajes de searchKb de este turno. El Blindaje los usa como fuente;
+    // el callback corre dentro de la tool, antes de verificar la respuesta.
+    const turnKbPassages: SearchKbResult[] = [];
     const tools = buildTools({
       env: this.env,
       getConversationId: () => convId,
+      onSearchKbResults: (results) => {
+        turnKbPassages.push(...results);
+        if (turnKbPassages.length > 10) {
+          turnKbPassages.splice(0, turnKbPassages.length - 10);
+        }
+      },
     });
     const toolNames = Object.keys(tools);
 
@@ -347,6 +356,7 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     let cachedTokens = 0;
     let toolCallCount = 0;
     let toolCallsMade: { toolName: string; input: unknown }[] = [];
+    let turnToolResults: { tool: string; output: string }[] = [];
     let usedModelId = modelId;
 
     // Corre el loop del LLM con un modelo dado; deja los resultados en las vars.
@@ -367,6 +377,7 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       // Persist what the agent DID (not just what it said): tool name + input,
       // feeding the dashboard's thread chips, stats and the Mi Agente counters.
       toolCallsMade = turn.toolCallsMade;
+      turnToolResults = turn.toolResults;
     };
 
     try {
@@ -415,6 +426,32 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
 
       if (!ok) {
         assistantText = "Algo falló de mi lado, intenta de nuevo en un momento.";
+      }
+    }
+
+    // Blindaje (Pro): si la respuesta niega algo o afirma un dato, se contrasta
+    // contra la KB, el contexto, las instrucciones del dueño y las tools del
+    // turno. Sin respaldo → frase de espera + ticket. FAIL-OPEN.
+    const llmFailed = assistantText === "Algo falló de mi lado, intenta de nuevo en un momento.";
+    const blindajeOff = (this.env.BLINDAJE_MODE ?? "").trim().toLowerCase() === "off";
+    if (assistantText && !llmFailed && isPro(this.env) && !blindajeOff) {
+      try {
+        const { guardReply } = await import("./blindaje/verify");
+        const guard = await guardReply(this.env, {
+          replyText: assistantText,
+          turnUsedKb: turnKbPassages.length > 0,
+          kbPassages: turnKbPassages,
+          toolResults: turnToolResults,
+          businessContext: cfg.businessContext,
+          systemPrompt: cfg.systemPrompt,
+          customInstructions: cfg.customInstructions,
+          conversationId: convId,
+          channel: this.state.channel,
+          llm: cfg.llm,
+        });
+        if (guard.action === "replaced") assistantText = guard.finalText;
+      } catch (e) {
+        console.warn("[blindaje] guard falló — fail-open, va la respuesta original:", e);
       }
     }
 

@@ -24,6 +24,10 @@ export interface AgentConfig {
   monthlyBudgetUsd?: number;
   /** BYO-LLM del dashboard (proveedor / API key / modelo). */
   llm: LlmOverrides;
+  /** Hechos y reglas que el dueño escribió. El Blindaje las trata como fuente. */
+  customInstructions?: string;
+  /** Contexto del negocio (horarios, precios, servicios). */
+  businessContext?: string;
 }
 
 /** Extract the BYO-LLM overrides from a settings snapshot. */
@@ -160,5 +164,7 @@ export async function resolveAgentConfig(env: Env, toolNames: string[]): Promise
     temperature,
     monthlyBudgetUsd,
     llm: llmOverridesFrom(settings),
+    customInstructions,
+    businessContext,
   };
 }

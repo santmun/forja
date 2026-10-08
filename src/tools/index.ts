@@ -1,6 +1,6 @@
 import type { Env } from "../env";
 import { isPro } from "../config";
-import { searchKbTool } from "./searchKb";
+import { searchKbTool, type SearchKbOnResults } from "./searchKb";
 import { handoffHumanTool } from "./handoffHuman";
 import { pauseBotTool } from "./pauseBot";
 import { snoozeUserTool } from "./snoozeUser";
@@ -11,6 +11,7 @@ import { catalogQueryTool } from "./catalogQuery";
 export interface ToolContext {
   env: Env;
   getConversationId: () => string | null;
+  onSearchKbResults?: SearchKbOnResults;
 }
 
 export function buildTools(ctx: ToolContext) {
@@ -19,7 +20,7 @@ export function buildTools(ctx: ToolContext) {
   // propia cuenta/llave, sin costo para Forja, así que es valor central sin gate. Lo Pro
   // es consultar catálogo/inventario y las tools avanzadas por nicho.
   const tools: Record<string, any> = {
-    searchKb: searchKbTool(ctx.env),
+    searchKb: searchKbTool(ctx.env, ctx.onSearchKbResults),
     handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId),
     pauseBot: pauseBotTool(ctx.env, ctx.getConversationId),
     snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId),

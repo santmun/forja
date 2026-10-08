@@ -17,6 +17,11 @@ export interface Env {
   BUSINESS_NAME: string;
   BOT_LANGUAGE: string;
   BOT_TIER: "free" | "pro";
+  // Blindaje anti-invento (Pro). Sin valor = "full". "negaciones" solo vigila
+  // negaciones de existencia. "off" lo apaga. BLINDAJE_HOLDING_PHRASE reemplaza
+  // la frase de espera si el dueño quiere otro tono.
+  BLINDAJE_MODE?: string;
+  BLINDAJE_HOLDING_PHRASE?: string;
   // Nicho del bot (restaurante, inmobiliaria…). Selecciona el "niche pack" que
   // re-etiqueta el dashboard, aporta el playbook del giro y sus columnas.
   // Ausente/desconocido → pack genérico (comportamiento actual). Ver src/niches/.

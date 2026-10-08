@@ -37,6 +37,10 @@ BOT_LANGUAGE = "{{BOT_LANGUAGE}}"
 BOT_TIER = "{{BOT_TIER}}"  # 'free' | 'pro'
 BUFFER_SECONDS = "15"
 DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
+# BLINDAJE_MODE = "full"  # Pro: 'off' | 'negaciones' | 'full'. Sin línea = full.
+# 'negaciones' solo frena negaciones sin respaldo y datos positivos que no estén
+# en la KB, el contexto, las instrucciones del negocio o una tool de ese turno.
+# BLINDAJE_HOLDING_PHRASE = "Te lo confirmo en un momento."  # opcional; reemplaza la frase de espera
 
 # Optional egress (ticket 7E5F40): Worker→Anthropic/Zernio 400 vacío.
 #   AGENT_LOCATION_HINT = "wnam"   # pin DOs near US (only on FIRST create)
