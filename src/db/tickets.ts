@@ -42,6 +42,15 @@ export class TicketsRepo {
     );
   }
 
+  /** Añade contexto a un ticket que sigue abierto (mismo hilo, sin crear otro). */
+  async appendSummary(id: string, extra: string): Promise<void> {
+    const ticket = await this.getById(id);
+    if (!ticket) return;
+    // Conserva el contexto más reciente si el hilo se alarga.
+    const summary = `${ticket.summary}\n${extra}`.slice(-4000);
+    await this.db.run("UPDATE tickets SET summary = ? WHERE id = ?", [summary, id]);
+  }
+
   async resolve(id: string, resolvedBy: string): Promise<void> {
     await this.db.run(
       "UPDATE tickets SET status = 'resolved', resolved_at = ?, resolved_by = ? WHERE id = ?",
