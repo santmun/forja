@@ -38,6 +38,53 @@ function fromUsage(usage: any) {
   };
 }
 
+function plainStepText(step: any): string {
+  if (typeof step?.text === "string") return step.text;
+  if (!Array.isArray(step?.content)) return "";
+  return step.content
+    .filter((p: any) => p?.type === "text" && typeof p.text === "string")
+    .map((p: any) => p.text as string)
+    .join("");
+}
+
+/**
+ * El stream junta el texto de cada paso (antes y después de una tool) sin
+ * separador: "…el nuevo horario 💛Ya quedó anotado". Con dos o más trozos,
+ * los une con una línea en blanco. Un solo trozo regresa null para dejar
+ * el texto original intacto.
+ */
+export function joinStepTexts(steps: any[] | undefined): string | null {
+  if (!steps?.length) return null;
+  const parts: string[] = [];
+  const push = (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed) parts.push(trimmed);
+  };
+
+  for (const step of steps) {
+    const content = Array.isArray(step?.content) ? step.content : null;
+    const splitByTool = content?.some(
+      (p: any) => p?.type === "tool-call" || p?.type === "tool-result",
+    );
+    if (content && splitByTool) {
+      let buf = "";
+      for (const part of content) {
+        if (part?.type === "text" && typeof part.text === "string") buf += part.text;
+        else if (part?.type === "tool-call" || part?.type === "tool-result") {
+          push(buf);
+          buf = "";
+        }
+      }
+      push(buf);
+    } else {
+      push(plainStepText(step));
+    }
+  }
+
+  if (parts.length < 2) return null;
+  return parts.join("\n\n");
+}
+
 function fromSteps(steps: any[] | undefined) {
   const list = steps ?? [];
   return {
@@ -59,13 +106,13 @@ async function streamTurn(args: LlmTurnArgs): Promise<LlmTurnResult> {
   }
   const usage = await result.usage;
   const steps = await result.steps;
-  return { text, ...fromUsage(usage), ...fromSteps(steps) };
+  return { text: joinStepTexts(steps) ?? text, ...fromUsage(usage), ...fromSteps(steps) };
 }
 
 async function generateTurn(args: LlmTurnArgs): Promise<LlmTurnResult> {
   const result = await generateText(callArgs(args));
   return {
-    text: result.text ?? "",
+    text: joinStepTexts(result.steps) ?? result.text ?? "",
     ...fromUsage(result.usage),
     ...fromSteps(result.steps),
   };

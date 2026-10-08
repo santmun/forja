@@ -39,6 +39,8 @@ beforeEach(async () => {
     BOT_TIER: "pro",
     BUFFER_SECONDS: "8",
     DASHBOARD_PASSWORD: PASSWORD,
+    CALCOM_API_KEY: "cal_test",
+    CALCOM_EVENT_TYPE_ID: "12",
   } as unknown as Env;
   settings = new SettingsRepo(new Db(d1));
 });
@@ -59,6 +61,15 @@ describe("Mi Agente — page and canvas", () => {
     }
     // Buffer shows the effective seconds from env
     expect(html).toContain("8 s");
+  });
+
+  it("sin CALCOM_API_KEY no muestra scheduleAppointment en el canvas", async () => {
+    const bare = { ...env, CALCOM_API_KEY: undefined, CALCOM_EVENT_TYPE_ID: undefined };
+    const res = await adminApp.request("/agente", { headers: AUTH }, bare);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).not.toContain("scheduleAppointment");
+    expect(html).toContain("captureLead");
   });
 
   it("shows real channels from the conversations table", async () => {

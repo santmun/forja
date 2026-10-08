@@ -16,6 +16,9 @@ export interface Env {
   WA_DAILY_TEMPLATE_CAP?: string; // tope diario de plantillas HSM (default 250 — tier 1 de Meta)
   BUSINESS_NAME: string;
   BOT_LANGUAGE: string;
+  // Reloj que ve el modelo (saludos, "qué hora es", anticipación en horas).
+  // Si falta, se usa CALCOM_TIMEZONE y, si tampoco está, member/config.local.ts.
+  BOT_TIMEZONE?: string;
   BOT_TIER: "free" | "pro";
   // Nicho del bot (restaurante, inmobiliaria…). Selecciona el "niche pack" que
   // re-etiqueta el dashboard, aporta el playbook del giro y sus columnas.
@@ -81,7 +84,8 @@ export interface Env {
 
   // ── Cal.com (agenda real para scheduleAppointment) ───────────────────────
   // Con estas vars, el bot consulta disponibilidad real y reserva en Cal.com.
-  // Sin ellas, scheduleAppointment solo registra la cita para que el dueño la confirme.
+  // Sin CALCOM_API_KEY, scheduleAppointment no se registra: el bot no pide
+  // un correo "para Cal.com" cuando las citas se agendan por otro lado.
   CALCOM_API_KEY?: string;                 // secret: API key de Cal.com (cal_...)
   CALCOM_EVENT_TYPE_ID?: string;           // event type por defecto (numérico, como string)
   CALCOM_EVENT_TYPES?: string;             // opcional: JSON {"corte":123,"barba":456} servicio→eventTypeId
