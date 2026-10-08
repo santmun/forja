@@ -17,6 +17,14 @@ export interface Env {
   BUSINESS_NAME: string;
   BOT_LANGUAGE: string;
   BOT_TIER: "free" | "pro";
+  // Zona del panel (IANA, ej. America/Mexico_City). Si falta, el panel usa
+  // member/config.local.ts. Sin zona explícita, el Worker formatea en UTC.
+  BOT_TIMEZONE?: string;
+  // "on" = panel de cliente white-label: no muestra la marca Forja ni "Claude Code".
+  BRAND_HIDE_FORJA?: string;
+  // Ids de pestañas separados por coma (ej. "costs,insights"). Desaparecen del
+  // nav, de su ruta y —si incluye costs— de la tarjeta "Costo del mes".
+  HIDDEN_TABS?: string;
   // Nicho del bot (restaurante, inmobiliaria…). Selecciona el "niche pack" que
   // re-etiqueta el dashboard, aporta el playbook del giro y sus columnas.
   // Ausente/desconocido → pack genérico (comportamiento actual). Ver src/niches/.

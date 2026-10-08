@@ -4,6 +4,7 @@
 // paso 4 del onboarding (CLAUDE.md): conectar canales uno por uno y verlos
 // ponerse verdes.
 import type { Env } from "../../env";
+import { hidesForja } from "../brand";
 import { layout } from "./layout";
 
 interface ChannelStatus {
@@ -166,7 +167,7 @@ export function renderConexiones(env: Env): string {
     <div style="display:flex;flex-direction:column;gap:18px">
       <div style="display:flex;flex-direction:column;gap:2px">
         <h2 class="font-display font-semibold text-[15px] text-cream">Canales conectados: ${connected} de ${channels.length}</h2>
-        <p class="text-muted text-[12.5px]">Conecta los canales donde están tus clientes. Cuando un canal queda listo, su tarjeta se pone verde. Los secrets se configuran con <span class="font-mono">wrangler secret put NOMBRE</span> (o pídeselo a Claude Code).</p>
+        <p class="text-muted text-[12.5px]">Conecta los canales donde están tus clientes. Cuando un canal queda listo, su tarjeta se pone verde. Los secrets se configuran con <span class="font-mono">wrangler secret put NOMBRE</span>${hidesForja(env) ? "" : " (o pídeselo a Claude Code)"}.</p>
       </div>
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px">
         ${cards}

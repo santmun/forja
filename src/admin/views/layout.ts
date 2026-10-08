@@ -9,7 +9,8 @@
 // breadcrumb and page title are derived here.
 
 import type { Env } from "../../env";
-import { isPro, PRO_ONLY_TABS } from "../../config";
+import { isPro, hiddenTabs, PRO_ONLY_TABS } from "../../config";
+import { hidesForja } from "../brand";
 import { getNiche } from "../../niches";
 import type { NichePack } from "../../niches";
 
@@ -273,12 +274,20 @@ function applyNiche(item: Item, niche: NichePack | null): Item {
   return { ...item, label: niche.navLabel, icon: niche.navIcon };
 }
 
-function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): string {
+function esc(s: string): string {
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
+}
+
+function sidebar(activeTab: string, pro: boolean, niche: NichePack | null, env?: Env): string {
+  const hidden = new Set(env ? hiddenTabs(env) : []);
   const locked = (id: string) => !pro && (PRO_ONLY_TABS as readonly string[]).includes(id);
+  const brand = hidesForja(env) ? esc(env?.BUSINESS_NAME?.trim() || "Panel") : "Forja";
   const sections = NAV.map((sec) => {
-    const hasActive = sec.items.some((i) => i.id === activeTab);
+    const visible = sec.items.filter((i) => !hidden.has(i.id));
+    if (visible.length === 0) return "";
+    const hasActive = visible.some((i) => i.id === activeTab);
     const labelColor = hasActive ? "var(--accent)" : "var(--dim)";
-    const items = sec.items
+    const items = visible
       .map((raw) => {
         const i = applyNiche(raw, niche);
         return locked(i.id) ? navItemLocked(i) : navItem(i, i.id === activeTab);
@@ -294,7 +303,7 @@ function sidebar(activeTab: string, pro: boolean, niche: NichePack | null): stri
           <i data-lucide="terminal" width="18" height="18" style="color:var(--accent)"></i>
         </div>
         <div style="line-height:1.05">
-          <div style="font-family:'Space Grotesk';font-weight:700;font-size:15px;letter-spacing:-.02em">Forja</div>
+          <div style="font-family:'Space Grotesk';font-weight:700;font-size:15px;letter-spacing:-.02em">${brand}</div>
           <div style="font-size:9.5px;letter-spacing:.22em;color:var(--dim);text-transform:uppercase">Panel · ${pro ? "Pro" : "Free"}</div>
         </div>
       </div>
@@ -333,7 +342,7 @@ export function layout(opts: { title: string; activeTab: string; body: string; e
 </head>
 <body class="scanlines">
   <div class="shell">
-    ${sidebar(opts.activeTab, pro, niche)}
+    ${sidebar(opts.activeTab, pro, niche, opts.env)}
     <div style="display:flex;flex-direction:column;min-width:0">
       <header style="position:sticky;top:0;z-index:30;background:rgba(20,16,9,.9);backdrop-filter:blur(8px);border-bottom:1px solid var(--line);padding:14px 26px;display:flex;align-items:center;gap:20px">
         <div style="min-width:0">
@@ -411,10 +420,12 @@ export function renderUpgrade(env: Env, feature?: string): string {
           El panel <b style="color:var(--cream)">Pro</b> le suma el cerebro analítico y de crecimiento:
         </p>
         <div style="display:grid;gap:10px;margin-bottom:22px">${perks}</div>
-        <a href="https://horizontesia.com" target="_blank" rel="noopener" class="bigbtn"
+        ${hidesForja(env)
+          ? `<p style="font-size:13px;color:var(--muted);margin:0">Esta función no está en tu panel. Pídele a quien administra el bot que la active.</p>`
+          : `<a href="https://horizontesia.com" target="_blank" rel="noopener" class="bigbtn"
           style="display:inline-flex;align-items:center;gap:8px;background:var(--accent);border:1px solid var(--accent);color:#1a1206;box-shadow:4px 4px 0 var(--linelit);padding:12px 20px;font-family:'Space Grotesk';font-weight:700;font-size:14px">
           <i data-lucide="arrow-up-right" width="17" height="17"></i> Subir a Pro con la comunidad
-        </a>
+        </a>`}
       </div>
     </div>`;
   return layout({ title: "Pro", activeTab: "overview", body, env });

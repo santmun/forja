@@ -15,7 +15,7 @@ export async function renderTickets(env: Env): Promise<string> {
 
   const list = open
     .map((t) => {
-      const date = fmtDateTime(t.created_at);
+      const date = fmtDateTime(t.created_at, {}, env);
       const pillColor = STATUS_PILL[t.status] ?? "var(--muted)";
       return `<div class="tkcard bg-panel border border-line" style="padding:16px 18px;margin-bottom:12px">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">

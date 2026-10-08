@@ -35,6 +35,9 @@ BOT_NAME = "{{BOT_NAME}}"
 BUSINESS_NAME = "{{BUSINESS_NAME}}"
 BOT_LANGUAGE = "{{BOT_LANGUAGE}}"
 BOT_TIER = "{{BOT_TIER}}"  # 'free' | 'pro'
+# BOT_TIMEZONE = "America/Mexico_City"  # horas del panel; si falta, usa member/config.local.ts
+# BRAND_HIDE_FORJA = "on"                # white-label: oculta la marca Forja en el panel
+# HIDDEN_TABS = "costs"                  # ids separados por coma: insights, stats, costs, mejoras, campanas
 BUFFER_SECONDS = "15"
 DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 

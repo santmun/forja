@@ -22,6 +22,20 @@ export const PRO_ONLY_TOOLS = [
 // campañas — esos desbloquean con la comunidad.
 export const PRO_ONLY_TABS = ["insights", "stats", "costs", "mejoras", "campanas"] as const;
 
+// Pestañas que una agencia puede quitar del panel del cliente (env HIDDEN_TABS).
+// Resumen queda siempre: es la página a la que redirige una ruta oculta.
+export const HIDEABLE_TABS = ["insights", "stats", "costs", "mejoras", "campanas"] as const;
+
+/** Ids validados de HIDDEN_TABS. Un id desconocido se ignora. */
+export function hiddenTabs(env?: { HIDDEN_TABS?: string } | null): string[] {
+  const raw = env?.HIDDEN_TABS;
+  if (!raw) return [];
+  const allowed = HIDEABLE_TABS as readonly string[];
+  return [...new Set(
+    raw.split(",").map((s) => s.trim().toLowerCase()).filter((s) => allowed.includes(s)),
+  )];
+}
+
 export function isToolAvailable(env: Env, toolName: string): boolean {
   if (!PRO_ONLY_TOOLS.includes(toolName as (typeof PRO_ONLY_TOOLS)[number])) return true;
   return isPro(env);

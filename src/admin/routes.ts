@@ -21,7 +21,7 @@ import { probeMessagesEndpoint } from "../http/egress";
 import type { Env } from "../env";
 import { adminAuth } from "./auth";
 import { layout, renderUpgrade } from "./views/layout";
-import { isPro } from "../config";
+import { hiddenTabs, isPro } from "../config";
 import { renderOverview } from "./views/overview";
 import { renderStats } from "./views/stats";
 import { renderCosts } from "./views/costs";
@@ -80,7 +80,13 @@ const PRO_GATE: Array<[string, string]> = [
   ["/admin/mejoras", "Mejoras"],
   ["/admin/campanas", "Campañas"],
 ];
+function pathIsTab(path: string, id: string): boolean {
+  return path === `/${id}` || path.startsWith(`/${id}/`) || path === `/admin/${id}` || path.startsWith(`/admin/${id}/`);
+}
+
 adminApp.use("*", async (c, next) => {
+  const hidden = hiddenTabs(c.env);
+  if (hidden.some((id) => pathIsTab(c.req.path, id))) return c.redirect("/admin/overview");
   if (isPro(c.env)) return next();
   const path = c.req.path;
   const hit = PRO_GATE.find(([pre]) => path === pre || path.startsWith(pre + "/"));
