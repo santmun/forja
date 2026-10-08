@@ -3,7 +3,8 @@
 // Mismo ecosistema Graph que Meta (Messenger/IG), pero el formato del webhook y
 // del envío son DISTINTOS:
 //  • Entrante: object "whatsapp_business_account" → entry[].changes[].value.messages[]
-//    (los recibos de entrega/lectura vienen en value.statuses[] y se ignoran).
+//    Los recibos (sent/delivered/read/failed) vienen en value.statuses[] y los
+//    devuelve parseWhatsAppStatuses — no son mensajes del cliente.
 //  • Envío: POST graph.facebook.com/<PHONE_NUMBER_ID>/messages con el token del
 //    system user/WABA y { messaging_product:"whatsapp", to, type:"text", text }.
 //
@@ -11,7 +12,7 @@
 // (Bearer) → url, y GET url (Bearer) → bytes. Para reusar transcribe/vision sin
 // tocarlas, lo servimos por un proxy FIRMADO (/webhooks/whatsapp/media/:id): la
 // URL es pública pero con HMAC + expiración, y el token queda del lado del server.
-import type { ChannelAdapter, IncomingMessage, OutgoingReply } from "./shared";
+import type { ChannelAdapter, IncomingMessage, OutgoingReply, SendResult } from "./shared";
 import type { Env } from "../env";
 import { egressFetch } from "../http/egress";
 
@@ -28,6 +29,21 @@ interface WaMessage {
   audio?: { id?: string; voice?: boolean; mime_type?: string };
 }
 
+interface WaStatusError {
+  code?: number;
+  title?: string;
+  message?: string;
+  error_data?: { details?: string };
+}
+
+interface WaStatus {
+  id?: string;
+  status?: string;
+  timestamp?: string | number;
+  recipient_id?: string;
+  errors?: WaStatusError[];
+}
+
 interface WaChange {
   field?: string;
   value?: {
@@ -35,7 +51,7 @@ interface WaChange {
     metadata?: { phone_number_id?: string; display_phone_number?: string };
     contacts?: { profile?: { name?: string }; wa_id?: string }[];
     messages?: WaMessage[];
-    statuses?: unknown[];
+    statuses?: WaStatus[];
   };
 }
 
@@ -80,9 +96,10 @@ async function signedMediaUrl(mediaId: string, env: Env, origin: string): Promis
 
 /**
  * Convierte un webhook de WhatsApp Cloud en 0..N mensajes entrantes. Un POST
- * puede traer varias entradas y varios mensajes; los `statuses` (recibos) y los
- * tipos no soportados (ubicación, sticker, etc.) se ignoran. `origin` es la base
- * pública del worker (para firmar las URLs de media entrante).
+ * puede traer varias entradas y varios mensajes. Los `statuses` (recibos) no
+ * son mensajes: se leen con parseWhatsAppStatuses. Los tipos no soportados
+ * (ubicación, sticker, etc.) se ignoran. `origin` es la base pública del worker
+ * (para firmar las URLs de media entrante).
  */
 export async function parseWhatsAppEvents(
   body: WaWebhookBody,
@@ -94,7 +111,7 @@ export async function parseWhatsAppEvents(
     for (const change of entry.changes ?? []) {
       if (change.field && change.field !== "messages") continue;
       const value = change.value;
-      if (!value?.messages?.length) continue; // statuses-only u otros → ignora
+      if (!value?.messages?.length) continue; // solo recibos, o sin mensajes del cliente
       const nameByWaId = new Map<string, string>();
       for (const c of value.contacts ?? []) {
         if (c.wa_id && c.profile?.name) nameByWaId.set(c.wa_id, c.profile.name);
@@ -134,6 +151,100 @@ export async function parseWhatsAppEvents(
     }
   }
   return out;
+}
+
+export interface WhatsAppStatusEvent {
+  wamid: string;
+  status: string;
+  /** Unix en milisegundos. */
+  timestamp: number;
+  recipientId?: string;
+  errorCode?: number;
+  errorTitle?: string;
+}
+
+function unixToMs(ts: string | number | undefined, fallback: number): number {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return fallback;
+  return n < 1e12 ? n * 1000 : n;
+}
+
+/**
+ * Recibos de entrega de un webhook de WhatsApp Cloud.
+ * Meta manda sent, delivered, read y failed (con errors[].code, p.ej. 131047)
+ * en value.statuses[], a veces solos y a veces junto a messages[].
+ */
+export function parseWhatsAppStatuses(body: WaWebhookBody, now = Date.now()): WhatsAppStatusEvent[] {
+  const out: WhatsAppStatusEvent[] = [];
+  for (const entry of body.entry ?? []) {
+    for (const change of entry.changes ?? []) {
+      if (change.field && change.field !== "messages") continue;
+      const statuses = change.value?.statuses;
+      if (!Array.isArray(statuses)) continue;
+      for (const s of statuses) {
+        const wamid = s?.id ? String(s.id) : "";
+        const status = s?.status ? String(s.status).toLowerCase() : "";
+        if (!wamid || !status) continue;
+        const err = Array.isArray(s.errors) ? s.errors[0] : undefined;
+        out.push({
+          wamid,
+          status,
+          timestamp: unixToMs(s.timestamp, now),
+          recipientId: s.recipient_id ? String(s.recipient_id) : undefined,
+          errorCode: typeof err?.code === "number" ? err.code : undefined,
+          errorTitle: err?.title || err?.message || undefined,
+        });
+      }
+    }
+  }
+  return out;
+}
+
+interface GraphErrorBody {
+  error?: { code?: number; message?: string; error_data?: { details?: string } };
+}
+
+interface GraphSendBody {
+  messages?: { id?: string }[];
+}
+
+/** Error de envío de WhatsApp Cloud. `code` es el de Meta (131047 = ventana cerrada). */
+export class WhatsAppSendError extends Error {
+  readonly httpStatus: number;
+  readonly code?: number;
+  constructor(message: string, httpStatus: number, code?: number) {
+    super(message);
+    this.name = "WhatsAppSendError";
+    this.httpStatus = httpStatus;
+    this.code = code;
+  }
+}
+
+function describeWaFailure(httpStatus: number, raw: string): { message: string; code?: number } {
+  let code: number | undefined;
+  let details = raw.slice(0, 300);
+  try {
+    const parsed = JSON.parse(raw) as GraphErrorBody;
+    code = parsed.error?.code;
+    details = parsed.error?.error_data?.details || parsed.error?.message || details;
+  } catch {
+    /* el cuerpo no es JSON */
+  }
+  if (code === 131047) {
+    return { code, message: "Fuera de la ventana de 24 h: WhatsApp rechazó el mensaje (131047)." };
+  }
+  const suffix = details ? `: ${details}` : "";
+  return { code, message: `WhatsApp rechazó el mensaje${code ? ` (${code})` : ""}${suffix}` };
+}
+
+function readWamid(raw: string): string | undefined {
+  try {
+    const parsed = JSON.parse(raw) as GraphSendBody;
+    const id = parsed.messages?.[0]?.id;
+    return id ? String(id) : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -183,13 +294,14 @@ export const whatsappAdapter: ChannelAdapter = {
     return first;
   },
 
-  async sendReply(reply: OutgoingReply, env: Env): Promise<void> {
+  async sendReply(reply: OutgoingReply, env: Env): Promise<SendResult> {
     const phoneId = env.WHATSAPP_PHONE_NUMBER_ID;
     const token = env.WHATSAPP_ACCESS_TOKEN;
     if (!phoneId || !token) {
       throw new Error("WhatsApp Cloud: falta WHATSAPP_PHONE_NUMBER_ID o WHATSAPP_ACCESS_TOKEN.");
     }
     const url = `https://graph.facebook.com/${GRAPH_VERSION}/${phoneId}/messages`;
+    let providerMessageId: string | undefined;
     for (let i = 0; i < reply.chunks.length; i++) {
       const delay = i === 0 ? 0 : reply.interChunkDelayMs ?? 1000;
       if (delay > 0) await new Promise((r) => setTimeout(r, delay));
@@ -204,12 +316,19 @@ export const whatsappAdapter: ChannelAdapter = {
           text: { preview_url: false, body: reply.chunks[i] },
         }),
       });
-      // Fuera de la ventana de 24h Meta rechaza texto libre (pide plantilla HSM):
-      // no lo tragues, logéalo con el cuerpo para ver el motivo exacto.
+      const raw = await res.text().catch(() => "");
+      // Fuera de la ventana de 24h Meta rechaza texto libre (131047).
+      // Sin strict solo se loguea (el bot no debe tumbar el turno). Con strict
+      // —el panel— se lanza para no guardar el mensaje como enviado.
       if (!res.ok) {
-        const errBody = await res.text().catch(() => "");
-        console.error(`whatsapp sendReply ${res.status}: ${errBody}`);
+        const failure = describeWaFailure(res.status, raw);
+        if (reply.strict) throw new WhatsAppSendError(failure.message, res.status, failure.code);
+        console.error(`whatsapp sendReply ${res.status}: ${raw}`);
+        continue;
       }
+      const id = readWamid(raw);
+      if (id && !providerMessageId) providerMessageId = id;
     }
+    return providerMessageId ? { providerMessageId } : {};
   },
 };

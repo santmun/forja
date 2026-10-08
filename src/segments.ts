@@ -129,8 +129,62 @@ export async function segmentMembers(
   );
   return rows.map((r) => ({
     ...r,
-    inWindow: now - r.lastUserAt < WINDOW_SAFE_MS,
+    // Las campañas usan el margen de 23 h (WINDOW_SAFE_MS), no las 24 h exactas.
+    inWindow: serviceWindowFrom(r.lastUserAt, now, WINDOW_SAFE_MS).open,
   }));
+}
+
+export interface ServiceWindow {
+  /** true si todavía se puede mandar texto libre. */
+  open: boolean;
+  /** Último mensaje del cliente, o null si nunca escribió. */
+  lastUserAt: number | null;
+  /** Momento en que cierra la ventana (lastUserAt + windowMs). */
+  closesAt: number | null;
+}
+
+/**
+ * Ventana de servicio a partir del último mensaje del cliente.
+ * `windowMs` por defecto es las 24 h de Meta. Las campañas pasan
+ * WINDOW_SAFE_MS (23 h) para no rozar el cierre.
+ */
+export function serviceWindowFrom(
+  lastUserAt: number | null | undefined,
+  now = Date.now(),
+  windowMs = WINDOW_MS,
+): ServiceWindow {
+  if (lastUserAt == null || !Number.isFinite(Number(lastUserAt))) {
+    return { open: false, lastUserAt: null, closesAt: null };
+  }
+  const last = Number(lastUserAt);
+  const closesAt = last + windowMs;
+  return { open: now < closesAt, lastUserAt: last, closesAt };
+}
+
+/** Etiqueta corta para la lista: "✍ 5 h", "✍ 40 min" o "🔒". */
+export function windowHoursLabel(lastUserAt: number | null | undefined, now = Date.now()): string {
+  const win = serviceWindowFrom(lastUserAt, now);
+  if (!win.open || win.closesAt == null) return "🔒";
+  const ms = win.closesAt - now;
+  if (ms < 3_600_000) {
+    const min = Math.max(1, Math.ceil(ms / 60_000));
+    return `✍ ${min} min`;
+  }
+  return `✍ ${Math.floor(ms / 3_600_000)} h`;
+}
+
+/**
+ * Ventana de 24 h de una conversación, medida desde su último mensaje
+ * con role=user. La misma regla que usa el inbox del panel.
+ */
+export async function windowFor(db: Db, conversationId: string, now = Date.now()): Promise<ServiceWindow> {
+  const row = await db.first<{ lastUserAt: number | null }>(
+    `SELECT MAX(created_at) AS lastUserAt
+     FROM messages
+     WHERE conversation_id = ? AND role = 'user'`,
+    [conversationId],
+  );
+  return serviceWindowFrom(row?.lastUserAt ?? null, now);
 }
 
 export interface SegmentCount {

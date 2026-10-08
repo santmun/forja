@@ -32,6 +32,8 @@ import {
   renderSuggestionBox,
 } from "./views/conversations";
 import { pickAdapter } from "../replies/sender";
+import { windowFor } from "../segments";
+import { linkOutboundWamid } from "../db/deliveries";
 import { channelLabel } from "../channels/labels";
 import type { ChannelId } from "../channels/shared";
 import { renderInsights } from "./views/insights";
@@ -258,7 +260,7 @@ adminApp.get("/conversations/list-fragment", async (c) =>
 );
 
 adminApp.get("/conversations/thread/:id", async (c) =>
-  c.html(await renderThreadLive(c.env, c.req.param("id"))),
+  c.html(await renderThreadLive(c.env, c.req.param("id"), { oobComposer: true })),
 );
 
 // Old detail URLs (linked from Insights, notifications, etc.) → inbox selection.
@@ -573,17 +575,34 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   const conv = await convs.getById(id);
   if (!conv) return c.html(`<span class="text-red-600">✗ Conversación no encontrada.</span>`);
 
+  // WhatsApp Cloud rechaza el texto libre pasadas 24 h del último mensaje del
+  // cliente (131047). La misma ventana que windowFor. Sin esta revisión el
+  // panel guardaba el mensaje como enviado aunque Meta lo hubiera rechazado.
+  if (conv.channel === "whatsapp") {
+    const win = await windowFor(db, id);
+    if (!win.open) {
+      return c.html(
+        `<span class="text-red-600">✗ No se envió: la ventana de 24 h está cerrada. Este cliente no escribe hace más de 24 horas y WhatsApp no entrega el mensaje.</span>`,
+      );
+    }
+  }
+
+  let providerMessageId: string | undefined;
   try {
     const adapter = pickAdapter(conv.channel as ChannelId);
-    await adapter.sendReply(
+    const sent = await adapter.sendReply(
       {
         channel: conv.channel as ChannelId,
         channelUserId: conv.channel_user_id,
         chunks: [text],
         interChunkDelayMs: 0,
+        strict: true,
       },
       c.env,
     );
+    if (sent && typeof sent === "object" && sent.providerMessageId) {
+      providerMessageId = sent.providerMessageId;
+    }
   } catch (e) {
     // Nothing persisted on failure: the customer never got the message.
     const msg = e instanceof Error ? e.message : String(e);
@@ -591,7 +610,14 @@ adminApp.post("/conversations/:id/reply", async (c) => {
   }
 
   const msgs = new MessagesRepo(db);
-  await msgs.append(id, "owner", text);
+  const messageId = await msgs.append(id, "owner", text);
+  if (conv.channel === "whatsapp" && providerMessageId) {
+    try {
+      await linkOutboundWamid(db, { wamid: providerMessageId, messageId, conversationId: id });
+    } catch (err) {
+      console.error("link wamid:", err instanceof Error ? err.message : err);
+    }
+  }
   await convs.touchLastMessage(id);
   await convs.setPausedUntil(id, Date.now() + TAKEOVER_MS);
 

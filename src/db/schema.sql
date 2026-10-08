@@ -203,3 +203,19 @@ CREATE TABLE IF NOT EXISTS template_sends (
   UNIQUE (campaign_key, conversation_id)
 );
 CREATE INDEX IF NOT EXISTS idx_template_sends_time ON template_sends(sent_at);
+
+-- Recibos de WhatsApp Cloud (sent / delivered / read / failed).
+-- Se ligan al mensaje saliente por el wamid que Graph devuelve al enviar.
+-- Un webhook que llega antes del insert deja message_id vacío y el envío lo completa.
+CREATE TABLE IF NOT EXISTS message_deliveries (
+  wamid TEXT PRIMARY KEY,
+  message_id TEXT,
+  conversation_id TEXT,
+  status TEXT NOT NULL,
+  error_code INTEGER,
+  error_title TEXT,
+  status_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_deliveries_message ON message_deliveries(message_id);
+CREATE INDEX IF NOT EXISTS idx_deliveries_conv ON message_deliveries(conversation_id);

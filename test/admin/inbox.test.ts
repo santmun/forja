@@ -125,6 +125,7 @@ describe("inbox — owner reply (takeover)", () => {
     const [payload] = sendReplyMock.mock.calls[0];
     expect(payload.channelUserId).toBe("u3");
     expect(payload.chunks).toEqual(["Hola, soy Ana 👋"]);
+    expect(payload.strict).toBe(true);
 
     // Persisted as owner + bot paused (takeover).
     const history = await msgs.lastN(conv.id, 10);
@@ -162,6 +163,162 @@ describe("inbox — owner reply (takeover)", () => {
     );
     expect(await res.text()).toContain("Escribe un mensaje");
     expect(sendReplyMock).not.toHaveBeenCalled();
+  });
+});
+
+describe("inbox — ventana de 24 h en WhatsApp", () => {
+  it("no manda ni guarda el mensaje si la ventana está cerrada", async () => {
+    const conv = await convs.getOrCreate("whatsapp", "5215500002222", "Cerrada");
+    await msgs.append(conv.id, "user", "hola hace días", { createdAt: Date.now() - 26 * 3_600_000 });
+
+    const res = await adminApp.request(
+      `/conversations/${encodeURIComponent(conv.id)}/reply`,
+      { method: "POST", headers: FORM, body: new URLSearchParams({ text: "seguimiento" }) },
+      env,
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sent")).toBeNull();
+    expect(await res.text()).toContain("ventana de 24 h está cerrada");
+    expect(sendReplyMock).not.toHaveBeenCalled();
+
+    const history = await msgs.lastN(conv.id, 10);
+    expect(history.every((m) => m.role !== "owner")).toBe(true);
+    expect(await convs.isPaused(conv.id)).toBe(false);
+  });
+
+  it("un rechazo del canal no queda guardado como enviado", async () => {
+    const conv = await convs.getOrCreate("whatsapp", "5215500003333", "Rechazo");
+    await msgs.append(conv.id, "user", "acabo de escribir");
+    sendReplyMock.mockRejectedValue(new Error("Fuera de la ventana de 24 h: WhatsApp rechazó el mensaje (131047)."));
+
+    const res = await adminApp.request(
+      `/conversations/${encodeURIComponent(conv.id)}/reply`,
+      { method: "POST", headers: FORM, body: new URLSearchParams({ text: "no debe quedar" }) },
+      env,
+    );
+
+    expect(await res.text()).toContain("No se pudo enviar");
+    expect(res.headers.get("X-Sent")).toBeNull();
+    const history = await msgs.lastN(conv.id, 10);
+    expect(history.every((m) => m.content !== "no debe quedar")).toBe(true);
+    const n = await db.first<{ n: number }>("SELECT COUNT(*) as n FROM message_deliveries");
+    expect(n?.n).toBe(0);
+  });
+
+  it("con la ventana abierta manda en strict y guarda el wamid", async () => {
+    const conv = await convs.getOrCreate("whatsapp", "5215500004444", "Abierta");
+    await msgs.append(conv.id, "user", "hola", { createdAt: Date.now() - 3_600_000 });
+    sendReplyMock.mockResolvedValue({ providerMessageId: "wamid.panel.1" });
+
+    const res = await adminApp.request(
+      `/conversations/${encodeURIComponent(conv.id)}/reply`,
+      { method: "POST", headers: FORM, body: new URLSearchParams({ text: "te escribo yo" }) },
+      env,
+    );
+
+    expect(res.headers.get("X-Sent")).toBe("1");
+    const [payload] = sendReplyMock.mock.calls[0];
+    expect(payload.strict).toBe(true);
+    expect(payload.channel).toBe("whatsapp");
+
+    const history = await msgs.lastN(conv.id, 10);
+    const owner = history[history.length - 1];
+    expect(owner.role).toBe("owner");
+    const row = await db.first<{ message_id: string; status: string; conversation_id: string }>(
+      "SELECT message_id, status, conversation_id FROM message_deliveries WHERE wamid = ?",
+      ["wamid.panel.1"],
+    );
+    expect(row?.message_id).toBe(owner.id);
+    expect(row?.status).toBe("sent");
+    expect(row?.conversation_id).toBe(conv.id);
+    expect(await res.text()).toContain("✓ Enviado");
+  });
+
+  it("Telegram sigue pudiendo responder aunque el cliente no escriba hace días", async () => {
+    const conv = await convs.getOrCreate("telegram", "viejo", "Viejo");
+    await msgs.append(conv.id, "user", "hola", { createdAt: Date.now() - 10 * 24 * 3_600_000 });
+
+    const res = await adminApp.request(
+      `/conversations/${encodeURIComponent(conv.id)}/reply`,
+      { method: "POST", headers: FORM, body: new URLSearchParams({ text: "sigo aquí" }) },
+      env,
+    );
+
+    expect(res.headers.get("X-Sent")).toBe("1");
+    expect(sendReplyMock).toHaveBeenCalledTimes(1);
+    const history = await msgs.lastN(conv.id, 5);
+    expect(history[history.length - 1].content).toBe("sigo aquí");
+  });
+
+  it("el panel muestra el candado, las horas y el estado de entrega", async () => {
+    const closed = await convs.getOrCreate("whatsapp", "5215500005555", "Sin ventana");
+    await msgs.append(closed.id, "user", "hace una semana", { createdAt: Date.now() - 7 * 24 * 3_600_000 });
+    const ownerId = await msgs.append(closed.id, "owner", "esto no llegó");
+    await db.run(
+      `INSERT INTO message_deliveries
+        (wamid, message_id, conversation_id, status, error_code, error_title, status_at, updated_at)
+       VALUES (?, ?, ?, 'failed', 131047, 'Re-engagement message', ?, ?)`,
+      ["wamid.closed", ownerId, closed.id, Date.now(), Date.now()],
+    );
+
+    const open = await convs.getOrCreate("whatsapp", "5215500006666", "Con ventana");
+    // Un minuto de margen: si el render tarda, el piso de horas no baja de 19.
+    await msgs.append(open.id, "user", "hoy", { createdAt: Date.now() - 5 * 3_600_000 + 60_000 });
+    const seenId = await msgs.append(open.id, "owner", "ya lo vi");
+    await db.run(
+      `INSERT INTO message_deliveries
+        (wamid, message_id, conversation_id, status, error_code, error_title, status_at, updated_at)
+       VALUES (?, ?, ?, 'read', NULL, NULL, ?, ?)`,
+      ["wamid.seen", seenId, open.id, Date.now(), Date.now()],
+    );
+
+    const page = await adminApp.request("/conversations", { headers: AUTH }, env);
+    const html = await page.text();
+    expect(html).toContain("Puedo escribirle · 1");
+    expect(html).toContain("Ventana cerrada · 1");
+    expect(html).toContain("✍ 19 h");
+    expect(html).toContain("🔒");
+
+    const closedPage = await adminApp.request(
+      `/conversations?c=${encodeURIComponent(closed.id)}`,
+      { headers: AUTH },
+      env,
+    );
+    const closedHtml = await closedPage.text();
+    expect(closedHtml).toContain("🔒 Ventana cerrada");
+    expect(closedHtml).toContain("no acepta un mensaje libre");
+    expect(closedHtml).toContain("No le llegó: fuera de la ventana de 24 h");
+    expect(closedHtml).not.toContain("Responde como humano");
+
+    const openPage = await adminApp.request(
+      `/conversations?c=${encodeURIComponent(open.id)}`,
+      { headers: AUTH },
+      env,
+    );
+    const openHtml = await openPage.text();
+    expect(openHtml).toContain("Puedes escribirle hasta");
+    expect(openHtml).toContain("Responde como humano");
+    expect(openHtml).toContain("✓✓ Visto");
+    expect(openHtml).not.toContain("no acepta un mensaje libre");
+
+    const onlyClosed = await adminApp.request(
+      "/conversations?f=cerrada",
+      { headers: AUTH },
+      env,
+    );
+    const list = await onlyClosed.text();
+    expect(list).toContain("Sin ventana");
+    expect(list).not.toContain("Con ventana");
+
+    const thread = await adminApp.request(
+      `/conversations/thread/${encodeURIComponent(closed.id)}`,
+      { headers: AUTH },
+      env,
+    );
+    const threadHtml = await thread.text();
+    expect(threadHtml).toContain('id="composer-gate"');
+    expect(threadHtml).toContain("hx-swap-oob");
   });
 });
 
