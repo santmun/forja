@@ -8,7 +8,10 @@ export interface SearchKbResult {
   score: number;
 }
 
-export function searchKbTool(env: Env) {
+/** El agente guarda los pasajes del turno para el Blindaje. */
+export type SearchKbOnResults = (results: SearchKbResult[]) => void;
+
+export function searchKbTool(env: Env, onResults?: SearchKbOnResults) {
   return tool({
     description:
       "Busca en el knowledge base del negocio. Devuelve top-5 chunks con score 0-1. Si top-1 score < 0.7 no hay match útil — escala.",
@@ -24,12 +27,19 @@ export function searchKbTool(env: Env) {
         if (!Array.isArray(vec)) {
           return { error: "transient" as const, message: "embedding shape unexpected" };
         }
-        const matches = await env.KB.query(vec, { topK: 5 });
+        // Sin returnMetadata:"all", Vectorize devuelve el score pero title y
+        // content vacíos. El modelo (y el Blindaje) no pueden usar el texto.
+        const matches = await env.KB.query(vec, { topK: 5, returnMetadata: "all" });
         const results: SearchKbResult[] = (matches.matches ?? []).map((m: any) => ({
           title: (m.metadata?.title as string) ?? "",
           content: (m.metadata?.content as string) ?? "",
           score: m.score ?? 0,
         }));
+        try {
+          onResults?.(results);
+        } catch {
+          /* el callback no puede tumbar la búsqueda */
+        }
         return { results };
       } catch (e: any) {
         return { error: "transient" as const, message: String(e?.message ?? e) };

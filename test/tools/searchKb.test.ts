@@ -16,6 +16,10 @@ describe("searchKbTool", () => {
     expect(result.results).toHaveLength(2);
     expect(result.results[0].title).toBe("Embebar wall");
     expect(result.results[0].score).toBe(0.91);
+    expect(fakeEnv.KB.query).toHaveBeenCalledWith(
+      [0.1, 0.2, 0.3],
+      expect.objectContaining({ topK: 5, returnMetadata: "all" }),
+    );
   });
 
   it("returns empty results when KB throws", async () => {

@@ -17,6 +17,8 @@ export interface LlmTurnResult {
   cachedTokens: number;
   toolCallCount: number;
   toolCallsMade: { toolName: string; input: unknown }[];
+  /** Salidas de las tools del turno, salvo searchKb (esa va en los pasajes de KB). */
+  toolResults: { tool: string; output: string }[];
 }
 
 function callArgs(args: LlmTurnArgs) {
@@ -48,6 +50,16 @@ function fromSteps(steps: any[] | undefined) {
         input: tc.input,
       })),
     ),
+    toolResults: list
+      .flatMap((s) => s.toolResults ?? [])
+      .filter((tr: any) => tr?.toolName && tr.toolName !== "searchKb")
+      .map((tr: any) => ({
+        tool: String(tr.toolName),
+        output: (typeof tr.output === "string"
+          ? tr.output
+          : JSON.stringify(tr.output ?? tr.result ?? "")
+        ).slice(0, 8000),
+      })),
   };
 }
 

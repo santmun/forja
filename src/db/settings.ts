@@ -28,6 +28,8 @@ export const SETTING_KEYS = {
   llmProvider: "llm_provider", // "" (auto) | anthropic | openai
   llmApiKey: "llm_api_key", // owner's API key; empty = use the env key
   llmModel: "llm_model", // concrete model id; empty = auto tiers (fast⇄smart)
+  blindajeChecks: "blindaje_checks", // cuántas veces el verificador juzgó una respuesta
+  blindajeBlocked: "blindaje_blocked", // cuántas se reemplazaron por dato sin respaldo
 } as const;
 
 export type SettingKey = (typeof SETTING_KEYS)[keyof typeof SETTING_KEYS];
