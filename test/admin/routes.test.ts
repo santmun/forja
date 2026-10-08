@@ -96,6 +96,21 @@ describe("admin routes — auth", () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain("mensajes");
+    expect(html).toContain("COSTO DEL MES");
+  });
+
+  it("con Costos en HIDDEN_TABS el resumen no muestra la tarjeta y /costs redirige", async () => {
+    const env = makeEnv();
+    env.HIDDEN_TABS = "costs";
+    const headers = { Authorization: basicHeader(ADMIN_USERNAME, PASSWORD) };
+    const overview = await adminApp.fetch(req("/overview", { headers }), env);
+    expect(overview.status).toBe(200);
+    const html = await overview.text();
+    expect(html).not.toContain("COSTO DEL MES");
+    expect(html).not.toContain('href="/admin/costs"');
+    const costs = await adminApp.fetch(req("/costs", { headers }), env);
+    expect(costs.status).toBe(302);
+    expect(costs.headers.get("location")).toBe("/admin/overview");
   });
 });
 

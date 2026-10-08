@@ -43,4 +43,22 @@ describe("dashboard tier gating (nav)", () => {
     expect(html).toContain("horizontesia.com");
     expect(html).toContain("Subir a Pro");
   });
+
+  it("BRAND_HIDE_FORJA quita la marca Forja del sidebar y el enlace a la comunidad", () => {
+    const env = { BOT_TIER: "pro", BRAND_HIDE_FORJA: "on", BUSINESS_NAME: "NatBell" } as unknown as Env;
+    const html = layout({ title: "Test", activeTab: "overview", body: "<p>body</p>", env });
+    expect(html).toContain("NatBell");
+    expect(html).not.toContain(">Forja<");
+    const upgrade = renderUpgrade(env, "Costos");
+    expect(upgrade).not.toContain("horizontesia.com");
+    expect(upgrade).toContain("quien administra el bot");
+  });
+
+  it("HIDDEN_TABS=costs saca Costos del menú", () => {
+    const env = { BOT_TIER: "pro", HIDDEN_TABS: "costs, no-existe" } as unknown as Env;
+    const html = layout({ title: "Test", activeTab: "overview", body: "<p>body</p>", env });
+    expect(html).not.toContain('href="/admin/costs"');
+    expect(html).toContain('href="/admin/conversations"');
+    expect(html).toContain('href="/admin/insights"');
+  });
 });

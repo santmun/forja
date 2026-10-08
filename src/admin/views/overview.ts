@@ -12,6 +12,8 @@ import { InsightsRepo } from "../../db/insights";
 import { SuggestionsRepo } from "../../db/suggestions";
 import { channelLabel } from "../../channels/labels";
 import { getNiche } from "../../niches";
+import { hiddenTabs } from "../../config";
+import { hidesForja } from "../brand";
 
 function esc(s: string): string {
   return s.replace(
@@ -252,9 +254,24 @@ export async function renderOverview(env: Env): Promise<string> {
       <a href="/admin/mejoras" class="flex items-center gap-1 text-[11.5px] mt-2.5">ver todas <i data-lucide="arrow-right" width="13" height="13"></i></a>
     </div>`;
 
+  const showMonthCost = !hiddenTabs(env).includes("costs");
+  const costFooter = hidesForja(env) ? "IA" : "Claude";
+  const monthCostCard = showMonthCost
+    ? `
+        <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.14s">
+          <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">04</div>
+          <div class="flex items-center gap-2 text-muted">
+            <i data-lucide="coins" width="15" height="15"></i>
+            <span class="text-[11px] tracking-[.05em]">COSTO DEL MES</span>
+          </div>
+          <div class="glow font-display font-bold text-[38px] leading-none mt-3">$${totalCost.toFixed(2)}</div>
+          <div class="text-[11px] text-dim mt-2">${monthMsgs} mensajes · ${costFooter} · 30 días</div>
+        </div>`
+    : "";
+
   const body = `
     <div class="flex flex-col gap-[22px]">
-      <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-[14px]">
+      <section class="grid grid-cols-1 sm:grid-cols-2 ${showMonthCost ? "lg:grid-cols-4" : "lg:grid-cols-3"} gap-[14px]">
         <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.02s">
           <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">01</div>
           <div class="flex items-center gap-2 text-muted">
@@ -285,15 +302,7 @@ export async function renderOverview(env: Env): Promise<string> {
           <div class="text-[11px] text-dim mt-2">nuevos hoy</div>
         </div>
 
-        <div class="card bg-panel border border-line p-4 relative overflow-hidden" style="animation-delay:.14s">
-          <div class="absolute top-3 right-3 text-[9.5px] tracking-[.2em] text-dim uppercase">04</div>
-          <div class="flex items-center gap-2 text-muted">
-            <i data-lucide="coins" width="15" height="15"></i>
-            <span class="text-[11px] tracking-[.05em]">COSTO DEL MES</span>
-          </div>
-          <div class="glow font-display font-bold text-[38px] leading-none mt-3">$${totalCost.toFixed(2)}</div>
-          <div class="text-[11px] text-dim mt-2">${monthMsgs} mensajes · Claude · 30 días</div>
-        </div>
+        ${monthCostCard}
       </section>
 
       <section class="card bg-panel border border-line p-[18px]" style="animation-delay:.18s">
