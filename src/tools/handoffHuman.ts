@@ -20,14 +20,31 @@ export function handoffHumanTool(env: Env, getConversationId: () => string | nul
       const convId = getConversationId();
       const db = new Db(env.DB);
       const tickets = new TicketsRepo(db);
+      const convs = convId ? new ConversationsRepo(db) : null;
+      const note = `[${reason}] ${summary}`;
+
+      // Un cliente que insiste sobre el mismo traspaso no abre otro ticket:
+      // el anterior quedaría abierto, huérfano de la conversación, y el dueño
+      // recibiría un aviso por cada mensaje.
+      if (convId && convs) {
+        const conv = await convs.getById(convId);
+        const existingId = conv?.open_ticket_id;
+        if (existingId) {
+          const existing = await tickets.getById(existingId);
+          if (existing && existing.status !== "resolved") {
+            await tickets.appendSummary(existing.id, note);
+            return { ticketId: existing.id };
+          }
+        }
+      }
+
       const ticketId = await tickets.create({
         conversationId: convId,
         category,
-        summary: `[${reason}] ${summary}`,
+        summary: note,
         transcript: "", // populated by agent if it has access; left blank otherwise
       });
-      if (convId) {
-        const convs = new ConversationsRepo(db);
+      if (convId && convs) {
         await convs.setOpenTicket(convId, ticketId);
       }
 
