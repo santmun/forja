@@ -5,7 +5,8 @@ import { telegramAdapter } from "./channels/telegram";
 import { manychatAdapter } from "./channels/manychat";
 import { twilioAdapter } from "./channels/twilio";
 import { parseMetaEvents, verifyMetaSignature } from "./channels/meta";
-import { parseWhatsAppEvents, serveWhatsAppMedia } from "./channels/whatsapp";
+import { parseWhatsAppEvents, parseWhatsAppStatuses, serveWhatsAppMedia } from "./channels/whatsapp";
+import { applyWhatsAppStatuses } from "./db/deliveries";
 import { adminApp } from "./admin/routes";
 import { purgeOldMessages } from "./crons/purgeOldMessages";
 import { DAILY_CRON, isNightlyTick } from "./crons/schedule";
@@ -165,8 +166,20 @@ app.post("/webhooks/whatsapp", async (c) => {
     return c.text("bad json", 400);
   }
   const origin = c.env.DASHBOARD_BASE_URL || new URL(c.req.url).origin;
-  for (const msg of await parseWhatsAppEvents(body as any, c.env, origin)) {
+  const waBody = body as any;
+  for (const msg of await parseWhatsAppEvents(waBody, c.env, origin)) {
     await getAgentStub(c.env, `${msg.channel}:${msg.channelUserId}`).ingest(msg);
+  }
+  // Recibos (sent/delivered/read/failed). No son mensajes: se guardan por wamid.
+  // Si la tabla aún no existe, no tumbamos el webhook — Meta reintentaría y
+  // el mensaje del cliente se procesaría dos veces.
+  const statuses = parseWhatsAppStatuses(waBody);
+  if (statuses.length) {
+    try {
+      await applyWhatsAppStatuses(new Db(c.env.DB), statuses);
+    } catch (err) {
+      console.error("whatsapp statuses:", err instanceof Error ? err.message : err);
+    }
   }
   return c.text("EVENT_RECEIVED", 200);
 });

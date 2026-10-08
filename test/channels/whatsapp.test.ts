@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { parseWhatsAppEvents, whatsappAdapter } from "../../src/channels/whatsapp";
+import {
+  parseWhatsAppEvents,
+  parseWhatsAppStatuses,
+  WhatsAppSendError,
+  whatsappAdapter,
+} from "../../src/channels/whatsapp";
 
 const ORIGIN = "https://bot.example.workers.dev";
 const env = { WHATSAPP_APP_SECRET: "s3cr3t" } as any;
@@ -65,7 +70,7 @@ describe("parseWhatsAppEvents", () => {
     expect(out[0].text).toBeUndefined();
   });
 
-  it("ignora los recibos de entrega/lectura (statuses)", async () => {
+  it("no convierte los recibos en mensajes del cliente", async () => {
     const b = {
       object: "whatsapp_business_account",
       entry: [{ id: "WABA", changes: [{ field: "messages", value: { statuses: [{ id: "wamid.x", status: "delivered" }] } }] }],
@@ -84,6 +89,102 @@ describe("parseWhatsAppEvents", () => {
     expect(out).toHaveLength(0);
   });
 });
+
+describe("parseWhatsAppStatuses", () => {
+  const now = 1_800_000_000_000;
+
+  it("lee sent, delivered, read y failed con su código", () => {
+    const body = {
+      object: "whatsapp_business_account",
+      entry: [
+        {
+          id: "WABA",
+          changes: [
+            {
+              field: "messages",
+              value: {
+                statuses: [
+                  { id: "wamid.sent", status: "sent", timestamp: "1710000000", recipient_id: "5215511111111" },
+                  { id: "wamid.read", status: "read", timestamp: "1710000300", recipient_id: "5215511111111" },
+                ],
+              },
+            },
+            {
+              field: "messages",
+              value: {
+                statuses: [
+                  {
+                    id: "wamid.fail",
+                    status: "failed",
+                    timestamp: "1710000400",
+                    recipient_id: "5215522222222",
+                    errors: [
+                      {
+                        code: 131047,
+                        title: "Re-engagement message",
+                        message: "Re-engagement message",
+                        error_data: { details: "More than 24 hours have passed" },
+                      },
+                    ],
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      ],
+    };
+    const out = parseWhatsAppStatuses(body as any, now);
+    expect(out).toHaveLength(3);
+    expect(out[0]).toMatchObject({
+      wamid: "wamid.sent",
+      status: "sent",
+      timestamp: 1710000000 * 1000,
+      recipientId: "5215511111111",
+    });
+    expect(out[1].status).toBe("read");
+    expect(out[2]).toMatchObject({
+      wamid: "wamid.fail",
+      status: "failed",
+      errorCode: 131047,
+      errorTitle: "Re-engagement message",
+    });
+  });
+
+  it("lee los recibos aunque el mismo change traiga un mensaje", async () => {
+    const body = bodyFn([
+      { from: "5215512345678", id: "wamid.in", type: "text", text: { body: "hola" } },
+    ], {
+      statuses: [{ id: "wamid.out", status: "delivered", timestamp: "1710000001", recipient_id: "5215512345678" }],
+    });
+    const messages = await parseWhatsAppEvents(body as any, env, ORIGIN);
+    const statuses = parseWhatsAppStatuses(body as any, now);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].text).toBe("hola");
+    expect(statuses).toEqual([
+      expect.objectContaining({ wamid: "wamid.out", status: "delivered", timestamp: 1710000001 * 1000 }),
+    ]);
+  });
+
+  it("ignora changes que no son de messages y statuses sin id", () => {
+    const body = {
+      entry: [
+        {
+          changes: [
+            { field: "account_update", value: { statuses: [{ id: "wamid.no", status: "sent" }] } },
+            { field: "messages", value: { statuses: [{ status: "sent" }, { id: "wamid.ok", status: "delivered", timestamp: "10" }] } },
+          ],
+        },
+      ],
+    };
+    const out = parseWhatsAppStatuses(body as any, now);
+    expect(out.map((s) => s.wamid)).toEqual(["wamid.ok"]);
+  });
+});
+
+function bodyFn(messages: any[], extra: any = {}) {
+  return body(messages, extra);
+}
 
 describe("whatsappAdapter.sendReply", () => {
   afterEach(() => vi.restoreAllMocks());
@@ -107,6 +208,65 @@ describe("whatsappAdapter.sendReply", () => {
     expect(payload.to).toBe("5215512345678");
     expect(payload.type).toBe("text");
     expect(payload.text.body).toBe("hola");
+  });
+
+  it("en modo strict lanza con el código 131047 y no traga el rechazo", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            error: {
+              code: 131047,
+              message: "Re-engagement message",
+              error_data: { details: "More than 24 hours have passed since the customer last replied" },
+            },
+          }),
+          { status: 400 },
+        ),
+      ),
+    );
+    const err = await whatsappAdapter
+      .sendReply(
+        { channel: "whatsapp", channelUserId: "52155", chunks: ["seguimiento"], strict: true },
+        { WHATSAPP_PHONE_NUMBER_ID: "PHONE_ID", WHATSAPP_ACCESS_TOKEN: "TOKEN" } as any,
+      )
+      .then(
+        () => null,
+        (e) => e,
+      );
+    expect(err).toBeInstanceOf(WhatsAppSendError);
+    expect(err.code).toBe(131047);
+    expect(err.message).toMatch(/ventana de 24 h/);
+  });
+
+  it("sin strict un rechazo de Meta no lanza (el bot sigue el turno)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ error: { code: 131047, message: "Re-engagement message" } }), { status: 400 }),
+      ),
+    );
+    await expect(
+      whatsappAdapter.sendReply(
+        { channel: "whatsapp", channelUserId: "52155", chunks: ["hola"] },
+        { WHATSAPP_PHONE_NUMBER_ID: "PHONE_ID", WHATSAPP_ACCESS_TOKEN: "TOKEN" } as any,
+      ),
+    ).resolves.toEqual({});
+  });
+
+  it("devuelve el wamid que respondió Graph", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () =>
+        new Response(JSON.stringify({ messages: [{ id: "wamid.HBgLNTIx" }] }), { status: 200 }),
+      ),
+    );
+    const sent = await whatsappAdapter.sendReply(
+      { channel: "whatsapp", channelUserId: "52155", chunks: ["hola"], strict: true },
+      { WHATSAPP_PHONE_NUMBER_ID: "PHONE_ID", WHATSAPP_ACCESS_TOKEN: "TOKEN" } as any,
+    );
+    expect(sent && sent.providerMessageId).toBe("wamid.HBgLNTIx");
   });
 
   it("lanza si falta configuración", async () => {

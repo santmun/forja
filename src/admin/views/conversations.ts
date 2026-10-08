@@ -19,6 +19,8 @@ import { costOfUsage, type ModelId } from "../../pricing";
 import { channelLabel } from "../../channels/labels";
 import { layout } from "./layout";
 import { fmtDateTime } from "../format";
+import { WINDOW_MS, serviceWindowFrom, windowFor, windowHoursLabel, type ServiceWindow } from "../../segments";
+import { deliveriesForConversation, deliveryCaption } from "../../db/deliveries";
 
 /** Tiempo relativo corto en español (ej. "hace 5 min", "hace 2 h", "hace 3 d"). */
 function ago(ms: number | null | undefined): string {
@@ -152,6 +154,23 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
     conds.push(
       "EXISTS (SELECT 1 FROM conversation_insights i WHERE i.conversation_id = c.id AND i.sentiment = 'positive')",
     );
+  } else if (p.filter === "ventana") {
+    // WhatsApp dentro de las 24 h desde el último mensaje del cliente.
+    conds.push(
+      `c.channel = 'whatsapp' AND EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.conversation_id = c.id AND m.role = 'user' AND m.created_at > ?
+      )`,
+    );
+    params.push(now - WINDOW_MS);
+  } else if (p.filter === "cerrada") {
+    conds.push(
+      `c.channel = 'whatsapp' AND NOT EXISTS (
+        SELECT 1 FROM messages m
+        WHERE m.conversation_id = c.id AND m.role = 'user' AND m.created_at > ?
+      )`,
+    );
+    params.push(now - WINDOW_MS);
   }
   const whereSql = conds.length ? `WHERE ${conds.join(" AND ")}` : "";
 
@@ -161,7 +180,8 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
        (SELECT COUNT(*) FROM leads l WHERE l.conversation_id = c.id) as lead_count,
        (SELECT status FROM leads l WHERE l.conversation_id = c.id ORDER BY created_at DESC LIMIT 1) as lead_status,
        (SELECT COUNT(*) FROM tickets t WHERE t.conversation_id = c.id AND t.status != 'resolved') as open_tickets,
-       (SELECT sentiment FROM conversation_insights i WHERE i.conversation_id = c.id) as ai_sentiment
+       (SELECT sentiment FROM conversation_insights i WHERE i.conversation_id = c.id) as ai_sentiment,
+       (SELECT MAX(created_at) FROM messages WHERE conversation_id = c.id AND role = 'user') as last_user_at
      FROM conversations c
      ${whereSql}
      ORDER BY c.last_message_at DESC LIMIT 50`,
@@ -181,6 +201,13 @@ export async function renderInboxList(env: Env, p: InboxParams): Promise<string>
       if (r.ai_sentiment === "frustrated" || r.ai_sentiment === "angry") {
         const s = SENTIMENT_BADGE[r.ai_sentiment as string];
         badges.push(`<span style="${smallPill(SENTIMENT_COLOR[r.ai_sentiment as string])}">${s.txt}</span>`);
+      }
+      if (r.channel === "whatsapp") {
+        const label = windowHoursLabel(r.last_user_at, now);
+        const open = serviceWindowFrom(r.last_user_at, now).open;
+        badges.push(
+          `<span style="${smallPill(open ? "var(--ok)" : "var(--bad)")}">${escapeHtml(label)}</span>`,
+        );
       }
       const selected = r.id === p.selectedId;
       const name = escapeHtml(r.display_name ?? r.channel_user_id ?? "—");
@@ -249,7 +276,11 @@ function bloqueContacto(canal: string | null | undefined, idCanal: string): stri
   </span>`;
 }
 
-export async function renderThreadLive(env: Env, convId: string): Promise<string> {
+export async function renderThreadLive(
+  env: Env,
+  convId: string,
+  opts?: { oobComposer?: boolean },
+): Promise<string> {
   const db = new Db(env.DB);
   const conv = await db.first<any>("SELECT * FROM conversations WHERE id = ?", [convId]);
   if (!conv) return `<div style="padding:24px;font-size:12.5px;color:var(--dim)">Conversación no encontrada.</div>`;
@@ -259,8 +290,10 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     "SELECT * FROM messages WHERE conversation_id = ? ORDER BY created_at DESC LIMIT 100",
     [convId],
   );
+  const deliveries = conv.channel === "whatsapp" ? await deliveriesForConversation(db, convId) : new Map();
 
   const now = Date.now();
+  const waWindow = conv.channel === "whatsapp" ? await windowFor(db, convId, now) : null;
   const paused = conv.paused_until && conv.paused_until > now;
   const openTicket =
     (await db.first<{ n: number }>(
@@ -319,6 +352,7 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
     ${statusPill}
     ${sentBadge}
     ${openTicket > 0 ? `<span style="${statusBadge("var(--accent-2)")}">🔔 ticket abierto</span>` : ""}
+    ${waWindow ? windowPill(waWindow) : ""}
     ${controls}
   </div>`;
 
@@ -354,9 +388,14 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
 
       const isOwner = m.role === "owner";
       const cost = turnCost(m);
+      const receipt = deliveries.get(m.id);
+      const caption = receipt ? deliveryCaption(receipt) : null;
       const meta = isOwner
         ? `Tú · ${time}`
         : [m.model_used ? modelShort(m.model_used) : null, cost || null, time].filter(Boolean).join(" · ");
+      const receiptHtml = caption
+        ? ` · <span style="color:${caption.color};font-weight:600">${escapeHtml(caption.text)}</span>`
+        : "";
       const bubbleBg = isOwner
         ? "background:rgba(245,166,35,.1);border:1px solid rgba(245,166,35,.4)"
         : "background:var(--accent-soft);border:1px solid var(--linelit)";
@@ -364,29 +403,68 @@ export async function renderThreadLive(env: Env, convId: string): Promise<string
       <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;max-width:78%;margin-left:auto">
         ${chips}
         <div style="${bubbleBg};padding:9px 13px;font-size:12.5px;line-height:1.5;white-space:pre-wrap;color:var(--cream)">${escapeHtml(m.content)}</div>
-        <span style="font-size:9.5px;color:var(--dim)">${meta}</span>
+        <span style="font-size:9.5px;color:var(--dim)">${meta}${receiptHtml}</span>
       </div>`;
     })
     .join("");
+
+  // El hilo se refresca cada 5 s. El cuadro de respuesta no: si lo reemplazamos
+  // se borra lo que la persona está escribiendo. Solo empujamos el aviso de
+  // ventana (y el candado que tapa el cuadro cuando ya cerró).
+  const oob = opts?.oobComposer && waWindow ? composerOob(waWindow, convId) : "";
 
   return `
   ${header}
   <div id="msgscroll" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column-reverse;gap:12px;padding:16px;background:var(--bg)">
     ${bubbles || `<div style="text-align:center;font-size:12.5px;color:var(--dim);padding:32px 0">Sin mensajes.</div>`}
+  </div>${oob}`;
+}
+
+function windowPill(win: ServiceWindow): string {
+  if (!win.open || win.closesAt == null) {
+    return `<span style="${statusBadge("var(--bad)")}">🔒 Ventana cerrada</span>`;
+  }
+  const until = fmtDateTime(win.closesAt, { hour: "2-digit", minute: "2-digit" });
+  return `<span style="${statusBadge("var(--ok)")}">✍ hasta ${escapeHtml(until)}</span>`;
+}
+
+function windowNote(win: ServiceWindow): string {
+  if (!win.open || win.closesAt == null) return "";
+  const until = fmtDateTime(win.closesAt, { hour: "2-digit", minute: "2-digit" });
+  return `<span style="color:var(--ok)">Puedes escribirle hasta ${escapeHtml(until)}</span>`;
+}
+
+function windowLock(): string {
+  return `<div id="composer-gate" style="display:flex;flex-direction:column;gap:6px;padding:4px 2px">
+    <div style="font-size:12.5px;font-weight:700;color:var(--bad)">🔒 Ventana cerrada</div>
+    <p style="margin:0;font-size:12px;line-height:1.45;color:var(--muted)">WhatsApp no acepta un mensaje libre: este cliente no escribe hace más de 24 horas. Si lo mandas, no le llega.</p>
   </div>`;
+}
+
+/**
+ * El refresco del hilo cambia el cuadro sin borrar lo que se está escribiendo:
+ * el textarea y el aviso de envío llevan hx-preserve. Si la ventana cerró, el
+ * cuadro entero pasa a ser el candado.
+ */
+function composerOob(win: ServiceWindow, convId: string): string {
+  return `<div id="composer-slot" hx-swap-oob="innerHTML">${composerBody(win, convId)}</div>`;
 }
 
 // --- Composer (static per selection — NOT inside the polled fragment) ---------
 
-function renderComposer(convId: string): string {
+function composerBody(win: ServiceWindow | null, convId: string): string {
+  if (win && !win.open) return windowLock();
   const id = encodeURIComponent(convId);
+  const note = win
+    ? `<div id="wa-window-note" style="font-size:11px;min-height:1rem">${windowNote(win)}</div>`
+    : "";
   return `
-  <div style="border-top:1px solid var(--line);background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:8px">
-    <div id="suggestion-box"></div>
+    ${note}
+    <div id="suggestion-box" hx-preserve="true"></div>
     <form hx-post="/admin/conversations/${id}/reply" hx-target="#send-status" hx-swap="innerHTML"
           hx-on::after-request="if(event.detail.xhr.getResponseHeader('X-Sent')==='1')this.reset()"
           style="display:flex;align-items:flex-end;gap:9px">
-      <textarea name="text" id="reply-text" rows="2" required
+      <textarea name="text" id="reply-text" rows="2" required hx-preserve="true"
                 placeholder="Responde como humano — se envía por el canal del cliente y el bot se pausa…"
                 style="flex:1;background:var(--bg);border:1px solid var(--line);color:var(--cream);padding:10px 12px;font-size:12.5px;resize:none;outline:none"></textarea>
       <button type="button" hx-post="/admin/conversations/${id}/suggest" hx-target="#suggestion-box" hx-swap="innerHTML"
@@ -397,7 +475,19 @@ function renderComposer(convId: string): string {
         Enviar <i data-lucide="send" width="14" height="14"></i>
       </button>
     </form>
-    <div id="send-status" style="font-size:11px;min-height:1rem;color:var(--muted)"></div>
+    <div id="send-status" hx-preserve="true" style="font-size:11px;min-height:1rem;color:var(--muted)"></div>`;
+}
+
+const COMPOSER_SLOT_STYLE =
+  "border-top:1px solid var(--line);background:var(--panel);padding:12px;display:flex;flex-direction:column;gap:8px";
+
+async function renderComposer(env: Env, convId: string): Promise<string> {
+  const db = new Db(env.DB);
+  const conv = await db.first<{ channel: string }>("SELECT channel FROM conversations WHERE id = ?", [convId]);
+  const waWindow = conv?.channel === "whatsapp" ? await windowFor(db, convId) : null;
+  return `
+  <div id="composer-slot" style="${COMPOSER_SLOT_STYLE}">
+    ${composerBody(waWindow, convId)}
   </div>`;
 }
 
@@ -438,6 +528,23 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
           OR EXISTS (SELECT 1 FROM tickets t WHERE t.conversation_id = c.id AND t.status != 'resolved')`,
       [now],
     ))?.n ?? 0;
+  const cutoff = now - WINDOW_MS;
+  const winCounts = await db.first<{ abiertas: number; cerradas: number }>(
+    `SELECT
+       COALESCE(SUM(CASE WHEN last_user_at > ? THEN 1 ELSE 0 END), 0) AS abiertas,
+       COALESCE(SUM(CASE WHEN last_user_at IS NULL OR last_user_at <= ? THEN 1 ELSE 0 END), 0) AS cerradas
+     FROM (
+       SELECT (
+         SELECT MAX(m.created_at) FROM messages m
+         WHERE m.conversation_id = c.id AND m.role = 'user'
+       ) AS last_user_at
+       FROM conversations c
+       WHERE c.channel = 'whatsapp'
+     ) AS wa`,
+    [cutoff, cutoff],
+  );
+  const nAbiertas = Number(winCounts?.abiertas ?? 0);
+  const nCerradas = Number(winCounts?.cerradas ?? 0);
 
   const filterPill = (href: string, label: string, active: boolean, color: string) =>
     `<a href="${href}" class="chip" style="font-size:11px;letter-spacing:.05em;padding:5px 12px;white-space:nowrap;border:1px solid ${color};${
@@ -461,7 +568,7 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
            hx-trigger="every 5s[window.puedeRefrescar('msgscroll')]" hx-swap="innerHTML">
         ${thread}
       </div>
-      ${renderComposer(p.selectedId)}`;
+      ${await renderComposer(env, p.selectedId)}`;
   } else {
     rightPane = `
       <div class="flex-1 flex items-center justify-center" style="font-size:12.5px;color:var(--dim);background:var(--bg)">
@@ -476,6 +583,8 @@ export async function renderInbox(env: Env, p: InboxParams): Promise<string> {
       ${filterPill(inboxUrl({ filter: "atencion", selectedId: p.selectedId }), `🔔 Atención · ${needAttention}`, p.filter === "atencion", "var(--bad)")}
       ${filterPill(inboxUrl({ filter: "molestos", selectedId: p.selectedId }), `😠 Molestos · ${nMolestos}`, p.filter === "molestos", "var(--bad)")}
       ${filterPill(inboxUrl({ filter: "contentos", selectedId: p.selectedId }), `🙂 Contentos · ${nContentos}`, p.filter === "contentos", "var(--ok)")}
+      ${filterPill(inboxUrl({ filter: "ventana", selectedId: p.selectedId }), `Puedo escribirle · ${nAbiertas}`, p.filter === "ventana", "var(--ok)")}
+      ${filterPill(inboxUrl({ filter: "cerrada", selectedId: p.selectedId }), `Ventana cerrada · ${nCerradas}`, p.filter === "cerrada", "var(--bad)")}
       <form method="GET" action="/admin/conversations" class="ml-auto" style="display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--line);padding:7px 12px;min-width:220px">
         <i data-lucide="search" width="14" height="14" style="color:var(--dim)"></i>
         ${p.filter ? `<input type="hidden" name="f" value="${escapeHtml(p.filter)}">` : ""}
