@@ -139,6 +139,22 @@ describe("KB tab", () => {
     const res = await adminApp.request("/kb", {}, env);
     expect(res.status).toBe(401);
   });
+
+  it("reindex tells you to recreate the index when the dimension does not match", async () => {
+    await adminApp.request(
+      "/kb/save",
+      { method: "POST", headers: FORM, body: new URLSearchParams({ title: "Horarios", content: "Abrimos 9 a 7." }) },
+      env,
+    );
+    kbUpsert.mockRejectedValueOnce(new Error("Vector dimension mismatch: expected 768, got 1024"));
+
+    const res = await adminApp.request("/kb/reindex", { method: "POST", headers: AUTH }, env);
+    expect(res.status).toBe(400);
+    const text = await res.text();
+    expect(text).toContain("768");
+    expect(text).toContain("--dimensions=1024 --metric=cosine");
+    expect(text).not.toContain("Internal Server Error");
+  });
 });
 
 describe("budget save route", () => {

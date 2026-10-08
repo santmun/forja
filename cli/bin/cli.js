@@ -1502,6 +1502,117 @@ async function cmdUpdate(dirArg, flags) {
   console.log(C.dim("    ") + C.cyan(t().updPublishCmd) + C.dim("  (pnpm install && pnpm deploy)\n"));
 }
 
+// bge-m3 (@cf/baai/bge-m3) — la misma dimensión que exige /kb/reindex.
+const EXPECTED_VECTORIZE_DIMENSIONS = 1024;
+
+function numberDim(row) {
+  if (!row || typeof row !== "object") return null;
+  const raw = row.dimensions ?? row.config?.dimensions;
+  const n = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/** Lee `dimensions` de `wrangler vectorize info --json` o de la tabla de texto. */
+function parseVectorizeDimensions(output, indexName) {
+  if (typeof output !== "string" || !output.trim()) return null;
+  const candidates = [output.trim()];
+  const brace = output.search(/[\[{]/);
+  if (brace > 0) candidates.push(output.slice(brace).trim());
+  for (const c of candidates) {
+    try {
+      const parsed = JSON.parse(c);
+      const row = Array.isArray(parsed)
+        ? (indexName && parsed.find((x) => x && x.name === indexName)) || parsed[0]
+        : parsed;
+      const dim = numberDim(row);
+      if (dim != null) return dim;
+    } catch { /* puede ser la tabla, no JSON */ }
+  }
+  const lines = output.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const header = splitTableRow(lines[i]);
+    if (!header) continue;
+    const col = header.findIndex((cell) => /^dimensions?$/i.test(cell));
+    if (col < 0) continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      const cells = splitTableRow(lines[j]);
+      if (!cells || cells[col] == null) continue;
+      const n = Number(cells[col]);
+      if (Number.isInteger(n) && n > 0) return n;
+    }
+  }
+  const labeled = output.match(/dimensions?\s*[:=]\s*(\d+)/i);
+  return labeled ? Number(labeled[1]) : null;
+}
+
+function splitTableRow(line) {
+  if (typeof line !== "string") return null;
+  const trimmed = line.trim();
+  if (!trimmed.includes("│") && !trimmed.includes("|")) return null;
+  if (/^[├└┌┤┐┬┴┼─\-|+\s]+$/.test(trimmed)) return null;
+  const parts = trimmed.split(/[│|]/).map((s) => s.trim()).filter((s) => s.length > 0);
+  return parts.length ? parts : null;
+}
+
+/** null si no hay problema (1024 o dimensión desconocida). */
+function vectorizeDimensionIssue(dimensions, indexName, lang) {
+  if (typeof dimensions !== "number" || !Number.isFinite(dimensions)) return null;
+  if (dimensions === EXPECTED_VECTORIZE_DIMENSIONS) return null;
+  const en = lang === "en";
+  const name = indexName || "KB";
+  return {
+    message: en
+      ? `Vectorize index ${name} has ${dimensions} dimensions, not ${EXPECTED_VECTORIZE_DIMENSIONS}`
+      : `El índice Vectorize ${name} tiene ${dimensions} dimensiones, no ${EXPECTED_VECTORIZE_DIMENSIONS}`,
+    hint: en
+      ? `bge-m3 embeds at ${EXPECTED_VECTORIZE_DIMENSIONS}. Delete it and recreate: npx wrangler vectorize delete ${name} -y && npx wrangler vectorize create ${name} --dimensions=${EXPECTED_VECTORIZE_DIMENSIONS} --metric=cosine`
+      : `bge-m3 genera vectores de ${EXPECTED_VECTORIZE_DIMENSIONS}. Bórralo y recréalo: npx wrangler vectorize delete ${name} -y && npx wrangler vectorize create ${name} --dimensions=${EXPECTED_VECTORIZE_DIMENSIONS} --metric=cosine`,
+  };
+}
+
+// Revisa la dimensión del índice KB. 1 si no coincide con 1024; 0 si está bien
+// o si no se pudo consultar (eso es un aviso, no tumba el diagnóstico).
+async function doctorVectorize(dir, wt) {
+  const ok = (m) => console.log("  " + C.green("✓") + " " + m);
+  const warn = (m, hint) => { console.log("  " + C.yellow("⚠") + " " + m); if (hint) console.log("    " + C.dim(hint)); };
+  const kbName = (wt.match(/index_name\s*=\s*["']([^"']+)/) || [])[1] || "";
+  if (!kbName || !/^[A-Za-z0-9_-]+$/.test(kbName)) return 0;
+  const en = L === "en";
+  let raw = "";
+  try {
+    raw = execFileSync("npx", ["wrangler", "vectorize", "info", kbName, "--json"], {
+      cwd: dir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 20_000,
+      shell: process.platform === "win32",
+    });
+  } catch {
+    warn(
+      en ? "Couldn't check the Vectorize index dimension" : "No pude revisar la dimensión del índice Vectorize",
+      en
+        ? `When you can: npx wrangler vectorize info ${kbName} --json (bge-m3 needs ${EXPECTED_VECTORIZE_DIMENSIONS})`
+        : `Cuando puedas: npx wrangler vectorize info ${kbName} --json (bge-m3 necesita ${EXPECTED_VECTORIZE_DIMENSIONS})`,
+    );
+    return 0;
+  }
+  const dim = parseVectorizeDimensions(String(raw), kbName);
+  const issue = vectorizeDimensionIssue(dim, kbName, L);
+  if (issue) {
+    warn(issue.message, issue.hint);
+    return 1;
+  }
+  if (dim === EXPECTED_VECTORIZE_DIMENSIONS) {
+    ok(en ? `Vectorize index ${kbName}: ${EXPECTED_VECTORIZE_DIMENSIONS} dimensions` : `Índice Vectorize ${kbName}: ${EXPECTED_VECTORIZE_DIMENSIONS} dimensiones`);
+    return 0;
+  }
+  warn(
+    en ? "Couldn't read the Vectorize index dimension" : "No pude leer la dimensión del índice Vectorize",
+    `npx wrangler vectorize info ${kbName} --json`,
+  );
+  return 0;
+}
+
 // doctor — diagnostica el bot instalado: config local, versión, licencia y si el
 // worker responde. Uso recurrente: corre `npx forjabot doctor` cuando algo falle.
 async function cmdDoctor(dirArg, flags) {
@@ -1535,6 +1646,10 @@ async function cmdDoctor(dirArg, flags) {
   const botName = val("BOT_NAME"), botNiche = val("BOT_NICHE"), baseUrl = val("DASHBOARD_BASE_URL");
   if (botName) ok(`Nombre del negocio: ${C.cyan(botName)}`); else warn("BOT_NAME sin definir", "El bot no sabe cómo se llama tu negocio.");
   if (botNiche) ok(`Giro (nicho): ${C.cyan(botNiche)}`); else warn("BOT_NICHE sin definir", "El panel usará el genérico en vez del de tu giro.");
+
+  // 3b) dimensión del índice Vectorize (bge-m3 = 1024). Un índice recreado a
+  // mano en 768 hace que /kb/reindex falle.
+  problems += await doctorVectorize(dir, wt);
 
   // 4) versión vs catálogo
   try {
@@ -2415,4 +2530,4 @@ if (IS_MAIN) {
 }
 
 // Exports para pruebas (no afectan el uso como CLI).
-export { renderMemberConfig, stampBrandAndBrain, writeStarterConfig, select, forgeSplash, installAgentSkill, parseFlags, starterOnboarding, loadCreds, saveCreds, normalizeWorkerUrl, listenLoopback, stampBotConfig, applyBusinessFlags, writeManifest, detectLocalMods, preservedByUpdate, engineOverwriteRisk, riskyUpdateGate, gnuTarTreatsAsRemote, tarLocalPath, buildTarArchiveArgv, execTarArchive, backupIsUsable, backupBeforeUpdate };
+export { renderMemberConfig, stampBrandAndBrain, writeStarterConfig, select, forgeSplash, installAgentSkill, parseFlags, starterOnboarding, loadCreds, saveCreds, normalizeWorkerUrl, listenLoopback, stampBotConfig, applyBusinessFlags, writeManifest, detectLocalMods, preservedByUpdate, engineOverwriteRisk, riskyUpdateGate, gnuTarTreatsAsRemote, tarLocalPath, buildTarArchiveArgv, execTarArchive, backupIsUsable, backupBeforeUpdate, parseVectorizeDimensions, vectorizeDimensionIssue };

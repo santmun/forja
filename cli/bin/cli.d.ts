@@ -25,3 +25,9 @@ export function execTarArchive(
 ): string | Buffer;
 export function backupIsUsable(backupPath: string | null | undefined): boolean;
 export function backupBeforeUpdate(dir: string, fromVer: string): string | null;
+export function parseVectorizeDimensions(output: string, indexName?: string): number | null;
+export function vectorizeDimensionIssue(
+  dimensions: number | null,
+  indexName?: string,
+  lang?: string,
+): { message: string; hint: string } | null;
