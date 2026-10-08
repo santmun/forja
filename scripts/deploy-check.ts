@@ -48,6 +48,65 @@ export function validateDeployConfig(cfg: DeployConfig): DeployCheckResult {
   return { ok: errors.length === 0, errors };
 }
 
+/**
+ * Quita comentarios TOML: la línea entera si (tras espacios) empieza con `#`,
+ * y el `# ...` final cuando el `#` no está dentro de comillas. Un placeholder
+ * que solo vive en un comentario no es config sin llenar.
+ */
+export function tomlWithoutComments(toml: string): string {
+  return toml
+    .split(/\r?\n/)
+    .map((line) => {
+      if (line.trimStart().startsWith("#")) return "";
+      let inSingle = false;
+      let inDouble = false;
+      let escaped = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (escaped) {
+          escaped = false;
+          continue;
+        }
+        if (ch === "\\" && inDouble) {
+          escaped = true;
+          continue;
+        }
+        if (ch === '"' && !inSingle) {
+          inDouble = !inDouble;
+          continue;
+        }
+        if (ch === "'" && !inDouble) {
+          inSingle = !inSingle;
+          continue;
+        }
+        if (ch === "#" && !inSingle && !inDouble) return line.slice(0, i);
+      }
+      return line;
+    })
+    .join("\n");
+}
+
+/** Placeholders `{{NAME}}` que siguen en valores, no solo en comentarios. */
+export function unfilledPlaceholders(toml: string): string[] {
+  const code = tomlWithoutComments(toml);
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const m of code.matchAll(/\{\{[A-Za-z0-9_]+\}\}/g)) {
+    if (seen.has(m[0])) continue;
+    seen.add(m[0]);
+    out.push(m[0]);
+  }
+  return out;
+}
+
+export function wranglerPlaceholderErrors(toml: string): string[] {
+  const found = unfilledPlaceholders(toml);
+  if (found.length === 0) return [];
+  return [
+    `Quedan placeholders sin llenar en wrangler.toml: ${found.join(", ")}. Reemplázalos por el valor real — un comentario que los mencione no cuenta.`,
+  ];
+}
+
 // Run as a script: read from process.env and exit non-zero on failure.
 // Guarded so importing this module in tests does not call process.exit.
 declare const process: { env: Record<string, string | undefined>; exit(code: number): never };
@@ -63,6 +122,7 @@ if (isMain) {
   // del primer deploy (FASE 3) y la llave de IA puede ponerse desde el panel —
   // así que canal/llave son AVISOS, no errores que bloqueen.
   const cfg: DeployConfig = { ...process.env };
+  let placeholderErrors: string[] = [];
 
   try {
     const { readFileSync } = await import("node:fs");
@@ -70,6 +130,9 @@ if (isMain) {
     for (const k of ["BOT_NAME", "BOT_TIER"] as const) {
       if (!cfg[k]) cfg[k] = toml.match(new RegExp(`^${k}\\s*=\\s*"([^"]*)"`, "m"))?.[1];
     }
+    // Busca {{...}} solo fuera de comentarios. Una línea `# ... {{D1_DATABASE_ID}}`
+    // (o un `#` final) no bloquea el deploy si el valor real ya está puesto.
+    placeholderErrors = wranglerPlaceholderErrors(toml);
   } catch { /* sin wrangler.toml: lo reportará el error de BOT_TIER */ }
 
   try {
@@ -80,7 +143,7 @@ if (isMain) {
     }
   } catch { /* sin red o sin login: seguimos solo con lo local */ }
 
-  const errors: string[] = [];
+  const errors: string[] = [...placeholderErrors];
   const warnings: string[] = [];
   if (!cfg.BOT_NAME) errors.push("Falta BOT_NAME en wrangler.toml.");
   if (!cfg.BOT_TIER) errors.push("Falta BOT_TIER ('free' | 'pro') en wrangler.toml.");
