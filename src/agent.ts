@@ -7,7 +7,7 @@ import { MessagesRepo } from "./db/messages";
 import { isPro } from "./config";
 import { resolveAgentConfig } from "./settings-loader";
 import { buildTools } from "./tools";
-import { AUDIO_EMPTY, AUDIO_NOT_UNDERSTOOD } from "./media/placeholders";
+import { AUDIO_EMPTY, AUDIO_NOT_UNDERSTOOD, textAfterImageFetchFailure } from "./media/placeholders";
 import { buildMultimodalUserMessage, describeImage } from "./media/vision";
 import { chunkReply } from "./replies/chunker";
 import { pickAdapter } from "./replies/sender";
@@ -228,7 +228,7 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     }
 
     // Persist user message
-    await msgs.append(convId, "user", combined);
+    const userMsgId = await msgs.append(convId, "user", combined);
     await convs.touchLastMessage(convId);
 
     // Load history (last 20)
@@ -263,12 +263,12 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
           aiMessages.push(buildMultimodalUserMessage(cleanText, image));
         } catch (e) {
           console.error("[SupportAgent] image fetch failed:", e);
-          aiMessages.push({
-            role: "user",
-            content: cleanText
-              ? `${cleanText}\n(no pude ver la imagen)`
-              : "(no pude ver la imagen)",
-          });
+          // La fila ya se guardó con "(imagen sin caption)" antes de saber
+          // que la descarga falló. Se reescribe ahora, antes del LLM, para
+          // que pauseSuspectedBot vea el fallo y no pause 24 h.
+          const failureText = textAfterImageFetchFailure(cleanText);
+          await msgs.updateContent(userMsgId, failureText);
+          aiMessages.push({ role: "user", content: failureText });
         }
       } else {
         aiMessages.push({ role: "user", content: lastUserMsg.content });

@@ -63,6 +63,10 @@ export class MessagesRepo {
     return id;
   }
 
+  async updateContent(id: string, content: string): Promise<void> {
+    await this.db.run("UPDATE messages SET content = ? WHERE id = ?", [content, id]);
+  }
+
   async lastN(conversationId: string, n: number): Promise<Message[]> {
     const rows = await this.db.all<Message>(
       `SELECT * FROM (

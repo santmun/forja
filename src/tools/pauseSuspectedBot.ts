@@ -22,7 +22,7 @@ export async function latestUserMessageIsMediaFailure(env: Env, conversationId: 
   const rows = await new Db(env.DB).all<{ content: string }>(
     `SELECT content FROM messages
      WHERE conversation_id = ? AND role = 'user'
-     ORDER BY created_at DESC LIMIT ?`,
+     ORDER BY created_at DESC, rowid DESC LIMIT ?`,
     [conversationId, LOOKBACK],
   );
   const latest = rows[0]?.content;
@@ -54,6 +54,7 @@ export function pauseSuspectedBotTool(env: Env, getConversationId: () => string 
         }
       } catch (e) {
         console.warn("[pauseSuspectedBot] no pude leer el historial:", e);
+        return { skipped: "history_unavailable" as const };
       }
       const convs = new ConversationsRepo(new Db(env.DB));
       const until = Date.now() + SUSPECTED_BOT_PAUSE_MS;

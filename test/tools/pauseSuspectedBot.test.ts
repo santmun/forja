@@ -34,16 +34,55 @@ describe("pauseSuspectedBotTool", () => {
   });
 
   it("no pausa si el último mensaje es el placeholder de audio", async () => {
-    await msgs.append(convId, "user", "hola, quiero una cita");
-    await msgs.append(convId, "user", "(no pude entender el audio)");
+    const base = 1_700_000_000_000;
+    await msgs.append(convId, "user", "hola, quiero una cita", { createdAt: base });
+    await msgs.append(convId, "user", "(no pude entender el audio)", { createdAt: base + 1_000 });
     await msgs.append(
       convId,
       "user",
       "(no pude entender el audio)\n(no pude entender el audio)\n(no pude entender el audio)",
+      { createdAt: base + 2_000 },
     );
     const tool = pauseSuspectedBotTool(env, () => convId);
     const result = await tool.execute!({ reason: "mismo texto repetido" }, {} as any);
     expect(result).toEqual({ skipped: "media_failure_placeholder" });
+    expect(await convs.isPaused(convId)).toBe(false);
+  });
+
+  it("una foto sin texto que sí se descargó sigue pudiendo pausarse", async () => {
+    await msgs.append(
+      convId,
+      "user",
+      "(imagen sin caption)\n[IMAGE_URL: https://api.zernio.com/v1/whatsapp/media/1]",
+      { createdAt: 1_700_000_000_000 },
+    );
+    const tool = pauseSuspectedBotTool(env, () => convId);
+    const result = await tool.execute!({ reason: "eco vacío" }, {} as any);
+    expect(result).toMatchObject({ reason: "eco vacío" });
+    expect(await convs.isPaused(convId)).toBe(true);
+  });
+
+  it("no pausa si el último mensaje es el fallo de una foto", async () => {
+    const base = 1_700_000_000_000;
+    await msgs.append(convId, "user", "hola", { createdAt: base });
+    await msgs.append(convId, "user", "(no pude ver la imagen)", { createdAt: base + 1_000 });
+    const tool = pauseSuspectedBotTool(env, () => convId);
+    const result = await tool.execute!({ reason: "mismo texto" }, {} as any);
+    expect(result).toEqual({ skipped: "media_failure_placeholder" });
+    expect(await convs.isPaused(convId)).toBe(false);
+  });
+
+  it("no pausa si no se puede leer el historial", async () => {
+    const broken = {
+      DB: {
+        prepare() {
+          throw new Error("d1 down");
+        },
+      },
+    };
+    const tool = pauseSuspectedBotTool(broken as any, () => convId);
+    const result = await tool.execute!({ reason: "bot" }, {} as any);
+    expect(result).toEqual({ skipped: "history_unavailable" });
     expect(await convs.isPaused(convId)).toBe(false);
   });
 
