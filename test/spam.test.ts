@@ -55,6 +55,19 @@ describe("isRepeatSpam", () => {
     await addUserMsg("k", 2000);
     expect(await isRepeatSpam(db, convId, "k")).toBe(false);
   });
+
+  it("el placeholder de audio que no se pudo oír no es spam, aunque se repita", async () => {
+    await addUserMsg("(no pude entender el audio)", 1000);
+    await addUserMsg("(no pude entender el audio)", 2000);
+    expect(await isRepeatSpam(db, convId, "(no pude entender el audio)")).toBe(false);
+    expect(
+      await isRepeatSpam(
+        db,
+        convId,
+        "(no pude entender el audio)\n(no pude entender el audio)\n(no pude entender el audio)",
+      ),
+    ).toBe(false);
+  });
 });
 
 describe("isOverDailyCap (backstop ChatGPT gratis)", () => {

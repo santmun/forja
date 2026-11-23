@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { buildMultimodalUserMessage } from "../../src/media/vision";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { buildMultimodalUserMessage, describeImage } from "../../src/media/vision";
 
 describe("buildMultimodalUserMessage", () => {
   it("returns a plain text user message when there is no image", () => {
@@ -47,5 +47,39 @@ describe("buildMultimodalUserMessage", () => {
     expect(msg.role).toBe("user");
     // fetch reference unchanged / untouched by the builder
     expect((globalThis as { fetch?: unknown }).fetch).toBe(fetchSpy);
+  });
+});
+
+describe("describeImage", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("deja una URL pública como URL y no la descarga", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const image = await describeImage("https://cdn.example.com/pic.jpg", {
+      ZERNIO_API_KEY: "zernio-test-key",
+    } as any);
+    expect(image).toBe("https://cdn.example.com/pic.jpg");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("baja la foto de Zernio con Bearer y la entrega como bytes", async () => {
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(jpeg, { status: 200, headers: { "content-type": "image/jpeg" } }),
+    );
+    const image = await describeImage(
+      "https://api.zernio.com/v1/whatsapp/media/pic?accountId=acc",
+      { ZERNIO_API_KEY: "zernio-test-key" } as any,
+    );
+    expect(image).toEqual({ bytes: jpeg, mediaType: "image/jpeg" });
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer zernio-test-key");
+    const msg = buildMultimodalUserMessage("mira", image);
+    const part = (msg.content as Array<Record<string, unknown>>)[0];
+    expect(part.type).toBe("image");
+    expect(part.image).toEqual(jpeg);
+    expect(part.mediaType).toBe("image/jpeg");
   });
 });

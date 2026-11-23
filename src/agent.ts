@@ -7,7 +7,8 @@ import { MessagesRepo } from "./db/messages";
 import { isPro } from "./config";
 import { resolveAgentConfig } from "./settings-loader";
 import { buildTools } from "./tools";
-import { buildMultimodalUserMessage } from "./media/vision";
+import { AUDIO_EMPTY, AUDIO_NOT_UNDERSTOOD } from "./media/placeholders";
+import { buildMultimodalUserMessage, describeImage } from "./media/vision";
 import { chunkReply } from "./replies/chunker";
 import { pickAdapter } from "./replies/sender";
 import { selectModel } from "./upgrade/modelSelector";
@@ -126,10 +127,10 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       try {
         const { transcribeAudio } = await import("./media/transcribe");
         const result = await transcribeAudio(payload.audioUrl, this.env);
-        processedText = result.text || "(audio sin transcripción)";
+        processedText = result.text || AUDIO_EMPTY;
       } catch (e) {
         console.error("[ingest] transcription failed:", e);
-        processedText = "(no pude entender el audio)";
+        processedText = AUDIO_NOT_UNDERSTOOD;
       }
     }
 
@@ -255,7 +256,20 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
         const cleanText = lastUserMsg.content
           .replace(/\n?\[IMAGE_URL: .+?\]/, "")
           .trim();
-        aiMessages.push(buildMultimodalUserMessage(cleanText, imageUrl));
+        // Zernio no sirve la foto sin Bearer. La bajamos aquí y el modelo
+        // recibe los bytes; una URL pública sigue siendo URL.
+        try {
+          const image = await describeImage(imageUrl, this.env);
+          aiMessages.push(buildMultimodalUserMessage(cleanText, image));
+        } catch (e) {
+          console.error("[SupportAgent] image fetch failed:", e);
+          aiMessages.push({
+            role: "user",
+            content: cleanText
+              ? `${cleanText}\n(no pude ver la imagen)`
+              : "(no pude ver la imagen)",
+          });
+        }
       } else {
         aiMessages.push({ role: "user", content: lastUserMsg.content });
       }

@@ -247,6 +247,43 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
     return streamTextMock.mock.calls[0][0].messages;
   }
 
+  it("pro tier: una foto de Zernio se baja con Bearer y llega como bytes", async () => {
+    const { agent } = makeAgent({ tier: "pro" });
+    agent.env.ZERNIO_API_KEY = "zernio-test-key";
+    const jpeg = new Uint8Array([0xff, 0xd8, 0xff]);
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(jpeg, { status: 200, headers: { "content-type": "image/jpeg" } }),
+    );
+    streamTextMock.mockReset();
+    streamTextMock.mockImplementation(() => makeStreamResult("vi el logo"));
+    vi.spyOn(MessagesRepo.prototype, "append").mockResolvedValue(undefined as any);
+    vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
+      {
+        role: "user",
+        content:
+          "mira\n[IMAGE_URL: https://api.zernio.com/v1/whatsapp/media/pic?accountId=acc]",
+      },
+    ] as any);
+    vi.spyOn(ConversationsRepo.prototype, "touchLastMessage").mockResolvedValue(undefined as any);
+    vi.spyOn(senderMod, "pickAdapter").mockReturnValue({ sendReply: vi.fn(async () => {}) } as any);
+    agent.state.pendingMessages = [
+      {
+        text: "mira\n[IMAGE_URL: https://api.zernio.com/v1/whatsapp/media/pic?accountId=acc]",
+        receivedAt: Date.now(),
+      },
+    ];
+
+    await agent.processBuffer();
+
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer zernio-test-key");
+    const messages = streamTextMock.mock.calls[0][0].messages;
+    const last = messages[messages.length - 1];
+    expect(last.content[0]).toMatchObject({ type: "image", mediaType: "image/jpeg" });
+    expect(last.content[0].image).toEqual(jpeg);
+    expect(last.content[1]).toEqual({ type: "text", text: "mira" });
+  });
+
   it("pro tier: builds a multimodal message from the [IMAGE_URL] marker", async () => {
     const messages = await runAlarm({
       tier: "pro",

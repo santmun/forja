@@ -5,6 +5,7 @@
 // la ignora por completo. El caso abusivo-pero-variado (insultos, bots que
 // varían el texto) lo cubre la tool snoozeUser, que decide el LLM.
 import { Db } from "./db/client";
+import { isMediaFailurePlaceholder } from "./media/placeholders";
 
 export const SPAM_SNOOZE_MS = 60 * 60_000;
 
@@ -27,6 +28,9 @@ export async function isRepeatSpam(
   conversationId: string,
   text: string,
 ): Promise<boolean> {
+  // Un audio que no se pudo transcribir deja el mismo placeholder cada vez.
+  // No es spam ni un bot: es nuestro fallo de descarga.
+  if (isMediaFailurePlaceholder(text)) return false;
   const norm = normalizeForSpam(text);
   if (norm.length < 2) return false; // "ok"/"sí" sueltos no cuentan como spam
   const rows = await db.all<{ content: string }>(
