@@ -290,12 +290,13 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("no", { status: 401 }));
     streamTextMock.mockReset();
     streamTextMock.mockImplementation(() => makeStreamResult("no vi la foto"));
-    vi.spyOn(MessagesRepo.prototype, "append").mockResolvedValue("msg-1" as any);
+    vi.spyOn(MessagesRepo.prototype, "append").mockResolvedValue("msg-nuevo" as any);
     const updateContent = vi
       .spyOn(MessagesRepo.prototype, "updateContent")
       .mockResolvedValue(undefined);
     vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
       {
+        id: "row-foto",
         role: "user",
         content:
           "(imagen sin caption)\n[IMAGE_URL: https://api.zernio.com/v1/whatsapp/media/pic?accountId=acc]",
@@ -312,12 +313,59 @@ describe("SupportAgent.alarm — multimodal last message (Task 6.3)", () => {
 
     await agent.processBuffer();
 
-    expect(updateContent).toHaveBeenCalledWith("msg-1", "(no pude ver la imagen)");
+    expect(updateContent).toHaveBeenCalledWith("row-foto", "(no pude ver la imagen)");
     const messages = streamTextMock.mock.calls[0][0].messages;
     expect(messages[messages.length - 1]).toEqual({
       role: "user",
       content: "(no pude ver la imagen)",
     });
+    expect(streamTextMock.mock.calls[0][0].tools.pauseSuspectedBot).toBeDefined();
+  });
+
+  it("si no se puede marcar el fallo de la foto, igual responde y no ofrece la pausa de 24 h", async () => {
+    const { agent } = makeAgent({ tier: "pro" });
+    agent.env.ZERNIO_API_KEY = "zernio-test-key";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("no", { status: 401 }));
+    streamTextMock.mockReset();
+    streamTextMock.mockImplementation(() => makeStreamResult("no vi la foto"));
+    vi.spyOn(MessagesRepo.prototype, "append").mockResolvedValue("msg-nuevo" as any);
+    vi.spyOn(MessagesRepo.prototype, "updateContent").mockRejectedValue(new Error("d1 down"));
+    vi.spyOn(MessagesRepo.prototype, "lastN").mockResolvedValue([
+      {
+        id: "row-foto",
+        role: "user",
+        content:
+          "(imagen sin caption)\n[IMAGE_URL: https://api.zernio.com/v1/whatsapp/media/pic?accountId=acc]",
+      },
+    ] as any);
+    vi.spyOn(ConversationsRepo.prototype, "touchLastMessage").mockResolvedValue(undefined as any);
+    const sendReply = vi.fn(async () => {});
+    vi.spyOn(senderMod, "pickAdapter").mockReturnValue({ sendReply } as any);
+    agent.state.pendingMessages = [
+      {
+        text: "(imagen sin caption)\n[IMAGE_URL: https://api.zernio.com/v1/whatsapp/media/pic?accountId=acc]",
+        receivedAt: Date.now(),
+      },
+    ];
+
+    await agent.processBuffer();
+
+    expect(sendReply).toHaveBeenCalled();
+    expect(streamTextMock.mock.calls[0][0].tools.pauseSuspectedBot).toBeUndefined();
+    expect(agent.state.pendingMessages).toHaveLength(0);
+  });
+
+  it("si no se puede guardar el mensaje, lo regresa al buffer y rearma la alarma", async () => {
+    const { agent, storage } = makeAgent({ tier: "free" });
+    streamTextMock.mockReset();
+    vi.spyOn(MessagesRepo.prototype, "append").mockRejectedValue(new Error("d1 down"));
+    agent.state.pendingMessages = [{ text: "hola", receivedAt: Date.now() }];
+
+    await agent.processBuffer();
+
+    expect(agent.state.pendingMessages.map((m: { text: string }) => m.text)).toEqual(["hola"]);
+    expect(storage.setAlarm).toHaveBeenCalled();
+    expect(streamTextMock).not.toHaveBeenCalled();
   });
 
   it("pro tier: builds a multimodal message from the [IMAGE_URL] marker", async () => {

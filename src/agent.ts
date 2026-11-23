@@ -227,12 +227,44 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       return;
     }
 
-    // Persist user message
-    const userMsgId = await msgs.append(convId, "user", combined);
-    await convs.touchLastMessage(convId);
+    // Si el insert no llega a D1, el mensaje sigue en el buffer y se rearma
+    // la alarma. Si ya se guardó, no se reintenta: un segundo append lo duplicaría.
+    let userMsgId: string | null = null;
+    try {
+      userMsgId = await msgs.append(convId, "user", combined);
+    } catch (e) {
+      console.error("[SupportAgent.processBuffer] no se pudo guardar el mensaje:", e);
+      this.setState({ ...this.state, pendingMessages: buffered });
+      const alarmAt = Date.now() + 500;
+      const alarmAtSec = Math.floor(alarmAt / 1000);
+      try {
+        this.sql`
+          INSERT OR REPLACE INTO cf_agents_schedules
+            (id, callback, payload, type, time, created_at)
+          VALUES
+            ('msg-buffer', 'processBuffer', '{}', 'delayed', ${alarmAtSec}, unixepoch())
+        `;
+        await this.ctx.storage.setAlarm(alarmAt);
+      } catch (armErr) {
+        console.error("[SupportAgent.processBuffer] no se pudo rearmar el buffer:", armErr);
+      }
+      return;
+    }
+    try {
+      await convs.touchLastMessage(convId);
+    } catch (e) {
+      console.warn("[SupportAgent.processBuffer] touchLastMessage failed:", e);
+    }
 
-    // Load history (last 20)
-    const history = await msgs.lastN(convId, 20);
+    // Load history (last 20). Si la lectura falla, el turno sigue con el
+    // mensaje que acabamos de guardar: ya está en D1 y no hay que insertarlo otra vez.
+    let history: { id?: string; role: string; content: string }[];
+    try {
+      history = await msgs.lastN(convId, 20);
+    } catch (e) {
+      console.error("[SupportAgent.processBuffer] no se pudo leer el historial:", e);
+      history = [{ id: userMsgId ?? undefined, role: "user", content: combined }];
+    }
     const aiMessages: any[] = history.slice(0, -1).map((m) => ({
       role: (m.role === "tool"
         ? "user"
@@ -244,6 +276,7 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
     // Build the LAST user message multimodal-aware: if it carries an
     // [IMAGE_URL: ...] marker AND we're on the Pro tier, attach the image.
     const lastUserMsg = history[history.length - 1];
+    let suppressSuspectedBotPause = false;
     if (lastUserMsg) {
       const imgMatch = lastUserMsg.content.match(/\[IMAGE_URL: (.+?)\]/);
       if (imgMatch && isPro(this.env)) {
@@ -263,11 +296,20 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
           aiMessages.push(buildMultimodalUserMessage(cleanText, image));
         } catch (e) {
           console.error("[SupportAgent] image fetch failed:", e);
-          // La fila ya se guardó con "(imagen sin caption)" antes de saber
-          // que la descarga falló. Se reescribe ahora, antes del LLM, para
-          // que pauseSuspectedBot vea el fallo y no pause 24 h.
+          // Se reescribe la fila que trae el [IMAGE_URL], no otra. Tiene que
+          // quedar lista antes del modelo para que pauseSuspectedBot la vea.
           const failureText = textAfterImageFetchFailure(cleanText);
-          await msgs.updateContent(userMsgId, failureText);
+          const markerRowId = lastUserMsg.id;
+          let rewritten = false;
+          if (markerRowId) {
+            try {
+              await msgs.updateContent(markerRowId, failureText);
+              rewritten = true;
+            } catch (writeErr) {
+              console.error("[SupportAgent] no se pudo marcar el fallo de la foto:", writeErr);
+            }
+          }
+          if (!rewritten) suppressSuspectedBotPause = true;
           aiMessages.push({ role: "user", content: failureText });
         }
       } else {
@@ -280,6 +322,9 @@ export class SupportAgent extends Agent<Env, SupportAgentState> {
       env: this.env,
       getConversationId: () => convId,
     });
+    // La fila sigue diciendo "(imagen sin caption)": sin el aviso de fallo,
+    // pauseSuspectedBot pausaría 24 h. En este turno no se le ofrece.
+    if (suppressSuspectedBotPause) delete tools.pauseSuspectedBot;
     const toolNames = Object.keys(tools);
 
     // Resolve effective config (D1 settings overlaid on env defaults).

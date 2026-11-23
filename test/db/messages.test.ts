@@ -28,6 +28,14 @@ describe("MessagesRepo", () => {
     expect(msgs[1].content).toBe("hola María, qué tal");
   });
 
+  it("lastN desempata timestamps iguales por orden de inserción", async () => {
+    const at = 1_700_000_000_000;
+    await msgRepo.append(convId, "user", "primero", { createdAt: at });
+    await msgRepo.append(convId, "user", "segundo", { createdAt: at });
+    const msgs = await msgRepo.lastN(convId, 20);
+    expect(msgs.map((m) => m.content)).toEqual(["primero", "segundo"]);
+  });
+
   it("lastN respects the limit", async () => {
     for (let i = 0; i < 25; i++) {
       await msgRepo.append(convId, "user", `msg ${i}`);
