@@ -4,6 +4,7 @@ import { searchKbTool } from "./searchKb";
 import { handoffHumanTool } from "./handoffHuman";
 import { pauseBotTool } from "./pauseBot";
 import { snoozeUserTool } from "./snoozeUser";
+import { pauseSuspectedBotTool } from "./pauseSuspectedBot";
 import { captureLeadTool } from "./captureLead";
 import { scheduleAppointmentTool } from "./scheduleAppointment";
 import { catalogQueryTool } from "./catalogQuery";
@@ -23,6 +24,7 @@ export function buildTools(ctx: ToolContext) {
     handoffHuman: handoffHumanTool(ctx.env, ctx.getConversationId),
     pauseBot: pauseBotTool(ctx.env, ctx.getConversationId),
     snoozeUser: snoozeUserTool(ctx.env, ctx.getConversationId),
+    pauseSuspectedBot: pauseSuspectedBotTool(ctx.env, ctx.getConversationId),
     captureLead: captureLeadTool(ctx.env, ctx.getConversationId),
     scheduleAppointment: scheduleAppointmentTool(ctx.env, ctx.getConversationId),
   };

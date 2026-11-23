@@ -78,6 +78,11 @@ export interface Env {
   WHATSAPP_VERIFY_TOKEN?: string;     // handshake GET del webhook (si falta, usa META_VERIFY_TOKEN)
   WHATSAPP_APP_SECRET?: string;       // firma X-Hub-Signature-256 (si falta, usa META_APP_SECRET)
   XAI_API_KEY?: string;             // xAI (Grok) — proveedor LLM alterno (ver src/llm/provider.ts)
+  // Zernio (WhatsApp). El webhook trae attachments[].url apuntando a
+  // GET /v1/whatsapp/media/{id}, que exige Authorization: Bearer. La llave
+  // solo se manda si el host es zernio.com o el de ZERNIO_API_BASE.
+  ZERNIO_API_KEY?: string;
+  ZERNIO_API_BASE?: string;          // opcional; default: cualquier host *.zernio.com
 
   // ── Cal.com (agenda real para scheduleAppointment) ───────────────────────
   // Con estas vars, el bot consulta disponibilidad real y reserva en Cal.com.

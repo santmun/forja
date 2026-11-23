@@ -51,6 +51,9 @@ DASHBOARD_BASE_URL = "https://horizontes-bot-{{BOT_SLUG}}.workers.dev"
 #   TELEGRAM_BOT_TOKEN         per-channel — Telegram bot
 #   MANYCHAT_API_KEY           per-channel — ManyChat (Pro)
 #   TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN / TWILIO_WA_FROM   per-channel — Twilio WhatsApp (Pro)
+#   ZERNIO_API_KEY             per-channel — Zernio (WhatsApp). Solo se envía a hosts zernio.com
+#                              (o al host de ZERNIO_API_BASE). wrangler secret put ZERNIO_API_KEY
+#   ZERNIO_API_BASE            optional (var) — base de la API si no es *.zernio.com
 #   CALCOM_API_KEY             optional — scheduleAppointment (Pro)
 #   GOOGLE_SERVICE_ACCOUNT_JSON  optional — Sheets export (Pro)
 #   RESEND_API_KEY             optional — handoff email

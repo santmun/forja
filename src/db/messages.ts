@@ -63,14 +63,19 @@ export class MessagesRepo {
     return id;
   }
 
+  async updateContent(id: string, content: string): Promise<void> {
+    await this.db.run("UPDATE messages SET content = ? WHERE id = ?", [content, id]);
+  }
+
   async lastN(conversationId: string, n: number): Promise<Message[]> {
     const rows = await this.db.all<Message>(
       `SELECT * FROM (
-         SELECT * FROM messages
+         SELECT messages.*, messages.rowid AS insert_order
+         FROM messages
          WHERE conversation_id = ?
-         ORDER BY created_at DESC
+         ORDER BY messages.created_at DESC, messages.rowid DESC
          LIMIT ?
-       ) ORDER BY created_at ASC`,
+       ) ORDER BY created_at ASC, insert_order ASC`,
       [conversationId, n],
     );
     return rows;
