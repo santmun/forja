@@ -42,7 +42,7 @@ import { KbDocsRepo, indexDoc, removeDocVectors, reindexAll, MAX_DOC_CHARS } fro
 import { renderMejoras } from "./views/mejoras";
 import { runFlywheel, getLessons, saveLessons } from "../flywheel/detect";
 import { applySuggestion, dismissSuggestion } from "../flywheel/apply";
-import { renderLeads, exportLeadsCsv } from "./views/leads";
+import { renderLeads, exportLeadsCsv, leadsExportFilename } from "./views/leads";
 import { renderTickets } from "./views/tickets";
 import { renderConfig } from "./views/config";
 import { renderConexiones } from "./views/conexiones";
@@ -518,11 +518,13 @@ adminApp.post("/config", async (c) => {
 // --- CSV export -------------------------------------------------------------
 
 adminApp.get("/leads/export.csv", async (c) => {
+  const now = new Date();
   const csv = await exportLeadsCsv(c.env);
+  const filename = leadsExportFilename(c.env, now);
   return new Response(csv, {
     headers: {
       "Content-Type": "text/csv; charset=utf-8",
-      "Content-Disposition": `attachment; filename="leads-${Date.now()}.csv"`,
+      "Content-Disposition": `attachment; filename="${filename}"`,
     },
   });
 });
