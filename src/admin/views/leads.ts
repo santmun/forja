@@ -1,9 +1,21 @@
 import type { Env } from "../../env";
 import { Db } from "../../db/client";
 import { LeadsRepo, leadMetadata, type Lead } from "../../db/leads";
-import { getNiche } from "../../niches";
+import { getNiche, type NichePack } from "../../niches";
+import { todayInTz } from "../../time/resolveDate";
+import { memberConfig } from "../../../member/config.local";
 import { layout } from "./layout";
 import { fmtDate, fmtDateTime } from "../format";
+
+// Mismas etiquetas que la tabla de Prospectos. El CSV las reutiliza para que
+// Excel no muestre "intent" / "status" cuando el panel está en español.
+const COL_FECHA = "Fecha";
+const COL_HORA = "Hora";
+const COL_NOMBRE = "Nombre";
+const COL_CONTACTO = "Contacto";
+const COL_RESUMEN = "Resumen";
+const COL_NOTAS = "Notas";
+const COL_ESTADO = "Estado";
 
 // Escapa texto del LLM/cliente antes de meterlo en HTML (el intent y las notas
 // pueden traer <, &, links pegados por el cliente, etc.).
@@ -27,19 +39,19 @@ export async function renderLeads(env: Env): Promise<string> {
   // Columnas: núcleo (fecha, nombre, contacto) + o bien las columnas del nicho
   // (leídas de metadata) o bien el "Resumen" genérico + estado (re-etiquetado).
   const cols: Col[] = [
-    { h: "Fecha", w: "94px", cell: (l) => `<span class="text-dim">${fmtDate(l.created_at)}</span>` },
-    { h: "Nombre", w: "minmax(120px,1.1fr)", cell: (l) => `<span class="text-cream" style="display:flex;align-items:center;gap:7px"><i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${esc(l.name) || "(sin nombre)"}</span>` },
-    { h: "Contacto", w: "minmax(110px,1fr)", cell: (l) => `<span class="text-muted">${esc(l.contact) || "—"}</span>` },
+    { h: COL_FECHA, w: "94px", cell: (l) => `<span class="text-dim">${fmtDate(l.created_at)}</span>` },
+    { h: COL_NOMBRE, w: "minmax(120px,1.1fr)", cell: (l) => `<span class="text-cream" style="display:flex;align-items:center;gap:7px"><i data-lucide="chevron-right" width="13" height="13" class="chev" style="flex:none;transition:transform .12s ease"></i>${esc(l.name) || "(sin nombre)"}</span>` },
+    { h: COL_CONTACTO, w: "minmax(110px,1fr)", cell: (l) => `<span class="text-muted">${esc(l.contact) || "—"}</span>` },
   ];
   if (niche.columns.length) {
     for (const c of niche.columns) {
       cols.push({ h: c.label, w: "minmax(78px,.85fr)", cell: (_l, meta) => `<span class="text-muted truncate">${esc(meta[c.key]) || "—"}</span>` });
     }
   } else {
-    cols.push({ h: "Resumen · click para ver detalle", w: "minmax(200px,1.8fr)", cell: (l) => `<span class="text-muted truncate">${esc(l.intent)}</span>` });
+    cols.push({ h: `${COL_RESUMEN} · click para ver detalle`, w: "minmax(200px,1.8fr)", cell: (l) => `<span class="text-muted truncate">${esc(l.intent)}</span>` });
   }
   cols.push({
-    h: "Estado",
+    h: COL_ESTADO,
     w: "132px",
     cell: (l) => `<form method="POST" action="/admin/leads/${l.id}/status" onclick="event.stopPropagation()">
       <select name="status" onchange="this.form.submit()"
@@ -116,14 +128,138 @@ export async function renderLeads(env: Env): Promise<string> {
   return layout({ title: niche.recordPlural, activeTab: "leads", body, env });
 }
 
+const FALLBACK_TZ = "America/Mexico_City";
+
+function validTimeZone(tz: string): boolean {
+  try {
+    Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Zona del export: BOT_TIMEZONE, si no CALCOM_TIMEZONE, si no la zona del
+ * negocio (member/config.local.ts) y al final America/Mexico_City.
+ */
+function leadsExportTimeZone(env: {
+  BOT_TIMEZONE?: string;
+  CALCOM_TIMEZONE?: string;
+}): string {
+  const candidates = [env.BOT_TIMEZONE, env.CALCOM_TIMEZONE, memberConfig.timezone, FALLBACK_TZ];
+  for (const raw of candidates) {
+    const tz = (raw ?? "").trim();
+    if (tz && validTimeZone(tz)) return tz;
+  }
+  return FALLBACK_TZ;
+}
+
+export function leadsExportFilename(env: Env, now = new Date()): string {
+  return `prospectos-${todayInTz(leadsExportTimeZone(env), now)}.csv`;
+}
+
+/** "extra_nota" → "Extra Nota". Las columnas del nicho usan su etiqueta, no esto. */
+function humanizeKey(key: string): string {
+  const words = key
+    .replace(/([a-záéíóúüñ])([A-Z])/g, "$1 $2")
+    .split(/[_\-\s]+/)
+    .filter(Boolean);
+  if (!words.length) return key;
+  return words.map((w) => w.charAt(0).toLocaleUpperCase("es") + w.slice(1)).join(" ");
+}
+
+/**
+ * Celda CSV para Excel (Windows): entre comillas, sin saltos de línea, y con
+ * un apóstrofo delante si el valor podría ejecutarse como fórmula (= + - @).
+ */
+function csvCell(value: string | null | undefined): string {
+  const flat = (value ?? "").replace(/[\r\n\u2028\u2029]+/g, " ");
+  const guarded = /^\s*[=+\-@]/.test(flat) ? `'${flat}` : flat;
+  return `"${guarded.replace(/"/g, '""')}"`;
+}
+
+function dateTimeInZone(ts: number, timeZone: string): { date: string; time: string } {
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return { date: "", time: "" };
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const get = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? "";
+  let hour = get("hour");
+  if (hour === "24") hour = "00";
+  return { date: `${get("year")}-${get("month")}-${get("day")}`, time: `${hour}:${get("minute")}` };
+}
+
+function statusText(niche: Pick<NichePack, "statusLabels">, status: string): string {
+  const labels = niche.statusLabels as Record<string, string>;
+  return labels[status] ?? status;
+}
+
+/** Solo llaves propias: `toString` o `constructor` no deben salir del prototipo. */
+function metaValue(meta: Record<string, string>, key: string): string {
+  if (!Object.hasOwn(meta, key)) return "";
+  const value = meta[key];
+  return typeof value === "string" ? value : "";
+}
+
+/** Arma el CSV (BOM + CRLF) a partir de filas ya cargadas y del nicho activo. */
+export function buildLeadsCsv(
+  list: Lead[],
+  niche: Pick<NichePack, "columns" | "statusLabels">,
+  timeZone: string,
+): string {
+  const nicheKeys = new Set(niche.columns.map((c) => c.key));
+  const extraKeys: string[] = [];
+  const seen = new Set<string>();
+  for (const lead of list) {
+    for (const key of Object.keys(leadMetadata(lead))) {
+      if (nicheKeys.has(key) || seen.has(key)) continue;
+      seen.add(key);
+      extraKeys.push(key);
+    }
+  }
+
+  const headers = [
+    COL_FECHA,
+    COL_HORA,
+    COL_NOMBRE,
+    COL_CONTACTO,
+    ...niche.columns.map((c) => c.label),
+    ...extraKeys.map(humanizeKey),
+    COL_RESUMEN,
+    COL_NOTAS,
+    COL_ESTADO,
+  ];
+
+  const lines = [headers.map((h) => csvCell(h)).join(",")];
+  for (const lead of list) {
+    const meta = leadMetadata(lead);
+    const when = dateTimeInZone(lead.created_at, timeZone);
+    const cells = [
+      when.date,
+      when.time,
+      lead.name ?? "",
+      lead.contact ?? "",
+      ...niche.columns.map((c) => metaValue(meta, c.key)),
+      ...extraKeys.map((k) => metaValue(meta, k)),
+      lead.intent ?? "",
+      lead.notes ?? "",
+      statusText(niche, lead.status),
+    ];
+    lines.push(cells.map((c) => csvCell(c)).join(","));
+  }
+  return `\uFEFF${lines.join("\r\n")}\r\n`;
+}
+
 export async function exportLeadsCsv(env: Env): Promise<string> {
   const leads = new LeadsRepo(new Db(env.DB));
   const list = await leads.list(10_000);
-  const header = "fecha,nombre,contacto,intent,status,notas,metadata\n";
-  const rows = list.map((l) => {
-    const date = new Date(l.created_at).toISOString();
-    const esc = (v: string | null) => `"${(v ?? "").replace(/"/g, '""')}"`;
-    return `${date},${esc(l.name)},${esc(l.contact)},${esc(l.intent)},${l.status},${esc(l.notes)},${esc(l.metadata)}`;
-  }).join("\n");
-  return header + rows;
+  return buildLeadsCsv(list, getNiche(env), leadsExportTimeZone(env));
 }

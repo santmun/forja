@@ -3,6 +3,9 @@ import { adminApp } from "../../src/admin/routes";
 import { ADMIN_USERNAME } from "../../src/admin/auth";
 import { SETTING_KEYS } from "../../src/db/settings";
 import type { Env } from "../../src/env";
+import type { Lead } from "../../src/db/leads";
+import { buildLeadsCsv } from "../../src/admin/views/leads";
+import { todayInTz } from "../../src/time/resolveDate";
 
 type Row = Record<string, unknown>;
 
@@ -156,7 +159,228 @@ describe("admin routes — navigation", () => {
     const res = await adminApp.fetch(req("/leads/export.csv", { headers: authHeaders }), makeEnv());
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toContain("text/csv");
-    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const filename = `prospectos-${todayInTz("America/Mexico_City")}.csv`;
+    expect(res.headers.get("content-disposition")).toBe(`attachment; filename="${filename}"`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // Excel en Windows solo respeta el UTF-8 si los bytes empiezan con EF BB BF.
+    // res.text() se los come al decodificar, así que se miran crudos.
+    expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);
+    const csv = new TextDecoder("utf-8").decode(bytes);
+    expect(csv.replace(/\r\n/g, "")).not.toContain("\n");
+    expect(parseCsv(csv)).toEqual([["Fecha", "Hora", "Nombre", "Contacto", "Resumen", "Notas", "Estado"]]);
+  });
+
+  it("exports prospectos readable in Excel: labels, timezone, metadata columns, formula guard", async () => {
+    const created = Date.parse("2026-01-15T18:45:00.000Z");
+    const env = makeEnv(
+      makeStubDb([
+        {
+          frag: "FROM leads",
+          all: [
+            leadRow({
+              name: "Moisés",
+              contact: "+52 81 0000",
+              intent: "Quiere \"cotización\"\nurgente",
+              notes: "=HYPERLINK(\"http://evil\")",
+              status: "contacted",
+              metadata: JSON.stringify({
+                empresa: "Café",
+                necesidad: "CRM",
+                presupuesto: "10k",
+                extra_nota: "hola, mundo",
+              }),
+              created_at: created,
+            }) as unknown as Row,
+          ],
+        },
+      ]),
+    );
+    env.BOT_TIMEZONE = "No/Existe";
+    env.CALCOM_TIMEZONE = "America/Mexico_City";
+    const res = await adminApp.fetch(req("/leads/export.csv", { headers: authHeaders }), env);
+    const csv = await res.text();
+    expect(parseCsv(csv)).toEqual([
+      ["Fecha", "Hora", "Nombre", "Contacto", "Empresa", "Necesidad", "Presupuesto", "Extra Nota", "Resumen", "Notas", "Estado"],
+      [
+        "2026-01-15",
+        "12:45",
+        "Moisés",
+        "'+52 81 0000",
+        "Café",
+        "CRM",
+        "10k",
+        "hola, mundo",
+        "Quiere \"cotización\" urgente",
+        "'=HYPERLINK(\"http://evil\")",
+        "Contactado",
+      ],
+    ]);
+    expect(csv).not.toContain("metadata");
+    expect(csv).not.toContain("contacted");
+  });
+
+  it("uses BOT_TIMEZONE before CALCOM_TIMEZONE for the file date and the hour", async () => {
+    const created = Date.parse("2026-01-15T18:45:00.000Z");
+    const env = makeEnv(
+      makeStubDb([
+        {
+          frag: "FROM leads",
+          all: [leadRow({ name: "Ana", status: "new", created_at: created }) as unknown as Row],
+        },
+      ]),
+    );
+    env.BOT_TIMEZONE = "America/Bogota";
+    env.CALCOM_TIMEZONE = "Europe/Madrid";
+    const res = await adminApp.fetch(req("/leads/export.csv", { headers: authHeaders }), env);
+    expect(res.headers.get("content-disposition")).toContain(
+      `filename="prospectos-${todayInTz("America/Bogota")}.csv"`,
+    );
+    const [, row] = parseCsv(await res.text());
+    expect(row[0]).toBe("2026-01-15");
+    expect(row[1]).toBe("13:45");
+    expect(row[row.length - 1]).toBe("Nuevo");
+  });
+});
+
+function leadRow(partial: Partial<Lead> & Pick<Lead, "name" | "status" | "created_at">): Lead {
+  return {
+    id: "lead-1",
+    conversation_id: null,
+    contact: null,
+    channel_user_id: null,
+    intent: "",
+    notes: null,
+    exported_to: null,
+    external_id: null,
+    metadata: null,
+    updated_at: partial.created_at,
+    ...partial,
+  };
+}
+
+/** Lee el CSV del export (BOM, comillas y CRLF) a filas. */
+function parseCsv(body: string): string[][] {
+  const text = body.replace(/^\uFEFF/, "");
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          cur += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        cur += ch;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+    } else if (ch === ",") {
+      row.push(cur);
+      cur = "";
+    } else if (ch === "\r") {
+      // CRLF lo cierra el \n
+    } else if (ch === "\n") {
+      row.push(cur);
+      rows.push(row);
+      row = [];
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  return rows;
+}
+
+describe("leads CSV — columnas del nicho", () => {
+  it("reparte metadata en las columnas del nicho, traduce el estado y aplana extras", () => {
+    const created = Date.parse("2026-06-02T04:00:00.000Z");
+    const csv = buildLeadsCsv(
+      [
+        leadRow({
+          name: "Moisés",
+          contact: "-interno",
+          intent: "linea1\r\nlinea2",
+          notes: "@suma",
+          status: "contacted",
+          metadata: JSON.stringify({
+            empresa: "Horizonte",
+            necesidad: "Pipeline",
+            presupuesto: "50k",
+            origen_lead: "Referido",
+          }),
+          created_at: created,
+        }),
+      ],
+      {
+        columns: [
+          { key: "empresa", label: "Empresa" },
+          { key: "necesidad", label: "Necesidad" },
+          { key: "presupuesto", label: "Presupuesto" },
+        ],
+        statusLabels: { new: "Nuevo", contacted: "Calificado", sold: "Ganado", lost: "Perdido" },
+      },
+      "America/Mexico_City",
+    );
+    expect(csv.startsWith("\uFEFF")).toBe(true);
+    expect(csv.endsWith("\r\n")).toBe(true);
+    expect(parseCsv(csv)).toEqual([
+      ["Fecha", "Hora", "Nombre", "Contacto", "Empresa", "Necesidad", "Presupuesto", "Origen Lead", "Resumen", "Notas", "Estado"],
+      [
+        "2026-06-01",
+        "22:00",
+        "Moisés",
+        "'-interno",
+        "Horizonte",
+        "Pipeline",
+        "50k",
+        "Referido",
+        "linea1 linea2",
+        "'@suma",
+        "Calificado",
+      ],
+    ]);
+  });
+
+  it("deja vacía una llave heredada y conserva un texto vacío explícito", () => {
+    const created = Date.parse("2026-01-15T18:45:00.000Z");
+    const csv = buildLeadsCsv(
+      [
+        leadRow({
+          name: "Ana",
+          status: "new",
+          created_at: created,
+          metadata: JSON.stringify({ empresa: "", toString: "Referido" }),
+        }),
+        leadRow({
+          id: "lead-2",
+          name: "Beto",
+          status: "new",
+          created_at: created,
+          metadata: null,
+        }),
+      ],
+      {
+        columns: [{ key: "empresa", label: "Empresa" }],
+        statusLabels: { new: "Nuevo", contacted: "Contactado", sold: "Vendido", lost: "Perdido" },
+      },
+      "America/Mexico_City",
+    );
+    const rows = parseCsv(csv);
+    expect(rows[0]).toEqual([
+      "Fecha", "Hora", "Nombre", "Contacto", "Empresa", "To String", "Resumen", "Notas", "Estado",
+    ]);
+    expect(rows[1][4]).toBe("");
+    expect(rows[1][5]).toBe("Referido");
+    expect(rows[2][4]).toBe("");
+    expect(rows[2][5]).toBe("");
   });
 });
 

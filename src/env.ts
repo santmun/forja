@@ -17,6 +17,8 @@ export interface Env {
   BUSINESS_NAME: string;
   BOT_LANGUAGE: string;
   BOT_TIER: "free" | "pro";
+  // Zona del negocio. El CSV de prospectos la prefiere sobre CALCOM_TIMEZONE.
+  BOT_TIMEZONE?: string;
   // Nicho del bot (restaurante, inmobiliaria…). Selecciona el "niche pack" que
   // re-etiqueta el dashboard, aporta el playbook del giro y sus columnas.
   // Ausente/desconocido → pack genérico (comportamiento actual). Ver src/niches/.
