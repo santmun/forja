@@ -348,6 +348,40 @@ describe("leads CSV — columnas del nicho", () => {
       ],
     ]);
   });
+
+  it("deja vacía una llave heredada y conserva un texto vacío explícito", () => {
+    const created = Date.parse("2026-01-15T18:45:00.000Z");
+    const csv = buildLeadsCsv(
+      [
+        leadRow({
+          name: "Ana",
+          status: "new",
+          created_at: created,
+          metadata: JSON.stringify({ empresa: "", toString: "Referido" }),
+        }),
+        leadRow({
+          id: "lead-2",
+          name: "Beto",
+          status: "new",
+          created_at: created,
+          metadata: null,
+        }),
+      ],
+      {
+        columns: [{ key: "empresa", label: "Empresa" }],
+        statusLabels: { new: "Nuevo", contacted: "Contactado", sold: "Vendido", lost: "Perdido" },
+      },
+      "America/Mexico_City",
+    );
+    const rows = parseCsv(csv);
+    expect(rows[0]).toEqual([
+      "Fecha", "Hora", "Nombre", "Contacto", "Empresa", "To String", "Resumen", "Notas", "Estado",
+    ]);
+    expect(rows[1][4]).toBe("");
+    expect(rows[1][5]).toBe("Referido");
+    expect(rows[2][4]).toBe("");
+    expect(rows[2][5]).toBe("");
+  });
 });
 
 describe("admin routes — mutations", () => {

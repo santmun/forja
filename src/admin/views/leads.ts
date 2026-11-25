@@ -202,6 +202,13 @@ function statusText(niche: Pick<NichePack, "statusLabels">, status: string): str
   return labels[status] ?? status;
 }
 
+/** Solo llaves propias: `toString` o `constructor` no deben salir del prototipo. */
+function metaValue(meta: Record<string, string>, key: string): string {
+  if (!Object.hasOwn(meta, key)) return "";
+  const value = meta[key];
+  return typeof value === "string" ? value : "";
+}
+
 /** Arma el CSV (BOM + CRLF) a partir de filas ya cargadas y del nicho activo. */
 export function buildLeadsCsv(
   list: Lead[],
@@ -240,8 +247,8 @@ export function buildLeadsCsv(
       when.time,
       lead.name ?? "",
       lead.contact ?? "",
-      ...niche.columns.map((c) => meta[c.key] ?? ""),
-      ...extraKeys.map((k) => meta[k] ?? ""),
+      ...niche.columns.map((c) => metaValue(meta, c.key)),
+      ...extraKeys.map((k) => metaValue(meta, k)),
       lead.intent ?? "",
       lead.notes ?? "",
       statusText(niche, lead.status),
